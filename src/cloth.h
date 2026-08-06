@@ -96,12 +96,11 @@ struct Cloth {
   }
 
     Vector3D spiky_kernel(Vector3D r, double h) {
-        if (r.norm() > h) {
+        double r_len = r.norm();
+        if (r_len > h || r_len < 1e-9) {
             return {0,0,0};
         }
-        return -r * 45.0 / (PI * pow(h, 6) * r.norm()) * pow(h - r.norm(), 2);
-
-//        return r * 15 / (PI * pow(h, 6)) * pow(h - r.norm(), 3);
+        return -r * 45.0 / (PI * pow(h, 6) * r_len) * pow(h - r_len, 2);
     }
 
   // Cloth properties
@@ -119,7 +118,7 @@ struct Cloth {
   ClothMesh *clothMesh;
 
   // Spatial hashing
-  unordered_map<float, vector<PointMass *> *> map;
+  unordered_map<int, vector<PointMass *> *> map;
 };
 
 #endif /* CLOTH_H */

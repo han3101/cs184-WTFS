@@ -233,7 +233,7 @@ void Cloth::build_spatial_map() {
 
   // TODO (Part 4): Build a spatial map out of all of the point masses.
   for (PointMass &pm : point_masses) {
-      float hash = hash_box(pm.position, h);
+      int hash = hash_box(pm.position, h);
       if (!map[hash]) {
           map[hash] = new vector<PointMass*>;
       }
@@ -243,14 +243,15 @@ void Cloth::build_spatial_map() {
 }
 
 void Cloth::self_collide(PointMass &pm, double simulation_steps) {
-  // TODO (Part 4): Handle self-collision for a given point mass.
-
-    float hash = hash_position(pm.position);
+  // NOTE: legacy cloth self-collision — not used in PBF path (use hash_box).
+  // Kept for compatibility; now delegates to hash_box int key.
+    int hash = hash_box(pm.position, h);
     Vector3D correction;
     int count = 0;
-    if(map[hash])
+    auto it = map.find(hash);
+    if(it != map.end())
     {
-        for(PointMass *pm_iter: *map[hash])
+        for(PointMass *pm_iter: *(it->second))
         {
             Vector3D diff = pm.position - pm_iter->position;
             if(pm_iter!=&pm && diff.norm() <= 1 * thickness)
@@ -301,13 +302,20 @@ void Cloth::set_neighbors(PointMass &pm, double h) {
     for (int i = -1; i <= 1; i++) {
         for (int j = -1; j <= 1; j++) {
             for (int k = -1; k <= 1; k++) {
-                int neighbor_key = hash_box(pos, h);
-                if (map.count(neighbor_key) > 0) {
+                Vector3D offset = Vector3D(i * h, j * h, k * h);
+                int neighbor_key = hash_box(pos + offset, h);
+                auto it = map.find(neighbor_key);
+                if (it != map.end()) {
                     // Iterate over each PointMass in the neighboring cell
-                    for (auto q = begin(*(map[neighbor_key])); q != end(*(map[neighbor_key])); q++) {
+                    for (auto q = begin(*(it->second)); q != end(*(it->second)); q++) {
                         double dist = (pm.position - (*q)->position).norm();
-                        if (dist <= h && dist > 0) { // Check within radius and not the same point
-                            pm.neighbors->emplace_back(*q);
+                        if (dist <= h && dist > 1e-9) {
+                            // avoid duplicate inserts when cells alias (negative coords)
+                            bool already = false;
+                            for (auto existing : *(pm.neighbors)) {
+                                if (existing == *q) { already = true; break; }
+                            }
+                            if (!already) pm.neighbors->emplace_back(*q);
                         }
                     }
                 }
