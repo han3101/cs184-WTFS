@@ -18,7 +18,7 @@
 
 namespace cpu_lbm {
 
-// ----- tiny 5x7 bitmap font (uppercase + digits + a few symbols) -----
+// ----- 5x7 bitmap font (uppercase + digits + symbols) -----
 // Each char: 7 rows, 5 columns. '1' = pixel on.
 // Stored as 5-char strings, row0 = top.
 static const std::unordered_map<char, std::array<std::string,7>> kFont = {
@@ -66,6 +66,14 @@ static const std::unordered_map<char, std::array<std::string,7>> kFont = {
   {'/', {"00001","00010","00010","00100","01000","01000","10000"}},
   {'(', {"00010","00100","01000","01000","01000","00100","00010"}},
   {')', {"01000","00100","00010","00010","00010","00100","01000"}},
+  {'[', {"01110","01000","01000","01000","01000","01000","01110"}},
+  {']', {"01110","00010","00010","00010","00010","00010","01110"}},
+  {'|', {"00100","00100","00100","00100","00100","00100","00100"}},
+  {',', {"00000","00000","00000","00000","00110","00100","01000"}},
+  {'<', {"00010","00100","01000","10000","01000","00100","00010"}},
+  {'>', {"01000","00100","00010","00001","00010","00100","01000"}},
+  {'?', {"01110","10001","00001","00010","00100","00000","00100"}},
+  {'!', {"00100","00100","00100","00100","00100","00000","00100"}},
   {' ', {"00000","00000","00000","00000","00000","00000","00000"}},
 };
 
@@ -83,24 +91,46 @@ void FieldViewer::framebufferSizeCallback(GLFWwindow *w, int ww, int wh) {
   (void)w;
 }
 
-void FieldViewer::scrollCallback(GLFWwindow *w, double /*xoff*/, double yoff) {
+void FieldViewer::scrollCallback(GLFWwindow *w, double xoff, double yoff) {
   auto *self = static_cast<FieldViewer*>(glfwGetWindowUserPointer(w));
-  if (self) self->handleScroll(yoff);
+  if (self) self->handleScroll(xoff, yoff);
 }
 
 void FieldViewer::mouseButtonCallback(GLFWwindow *w, int button, int action, int mods) {
   auto *self = static_cast<FieldViewer*>(glfwGetWindowUserPointer(w));
   if (!self) return;
-  double x,y; glfwGetCursorPos(w,&x,&y);
-  if (button == GLFW_MOUSE_BUTTON_RIGHT || button == GLFW_MOUSE_BUTTON_MIDDLE) {
-    if (action == GLFW_PRESS) {
+  double x, y;
+  glfwGetCursorPos(w, &x, &y);
+
+  if (action == GLFW_PRESS) {
+    if (button == GLFW_MOUSE_BUTTON_LEFT) {
+      self->leftDown_ = true;
+      int winW, winH, fbW, fbH;
+      glfwGetWindowSize(w, &winW, &winH);
+      glfwGetFramebufferSize(w, &fbW, &fbH);
+      double sy = (winH > 0) ? (double(fbH) / double(winH)) : 1.0;
+      double fbY = y * sy;
+      // If click is outside the top control bar, start field panning!
+      if (fbY > self->controlBarHeight()) {
+        self->isPanning_ = true;
+        self->lastMx_ = x;
+        self->lastMy_ = y;
+      }
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT || button == GLFW_MOUSE_BUTTON_MIDDLE) {
+      if (button == GLFW_MOUSE_BUTTON_RIGHT) self->rightDown_ = true;
+      if (button == GLFW_MOUSE_BUTTON_MIDDLE) self->middleDown_ = true;
       self->isPanning_ = true;
-      self->lastMx_ = x; self->lastMy_ = y;
-    } else if (action == GLFW_RELEASE) {
+      self->lastMx_ = x;
+      self->lastMy_ = y;
+    }
+  } else if (action == GLFW_RELEASE) {
+    if (button == GLFW_MOUSE_BUTTON_LEFT) self->leftDown_ = false;
+    if (button == GLFW_MOUSE_BUTTON_RIGHT) self->rightDown_ = false;
+    if (button == GLFW_MOUSE_BUTTON_MIDDLE) self->middleDown_ = false;
+    if (!self->leftDown_ && !self->rightDown_ && !self->middleDown_) {
       self->isPanning_ = false;
     }
   }
-  // left button state tracked in poll/drawControlBar
   (void)mods;
 }
 
@@ -108,22 +138,28 @@ void FieldViewer::cursorPosCallback(GLFWwindow *w, double xpos, double ypos) {
   auto *self = static_cast<FieldViewer*>(glfwGetWindowUserPointer(w));
   if (!self) return;
   if (self->isPanning_) {
-    int ww,wh; glfwGetFramebufferSize(w,&ww,&wh);
-    double dx = xpos - self->lastMx_;
-    double dy = ypos - self->lastMy_;
-    // field per pixel, corrected for zoom
-    float fppX = float(self->nx_) / float(ww) / self->zoom_;
-    float fppY = float(self->ny_) / float(wh) / self->zoom_;
-    self->panX_ += float(dx) * fppX;
-    // screen y top->bottom, field y bottom->top
-    self->panY_ -= float(dy) * fppY;
-    // clamp pan so view stays roughly in bounds (allow some overscan)
-    float maxPan = 60.0f;
-    self->panX_ = std::clamp(self->panX_, -maxPan, maxPan);
-    self->panY_ = std::clamp(self->panY_, -maxPan, maxPan);
-    self->lastMx_ = xpos; self->lastMy_ = ypos;
+    int winW, winH;
+    glfwGetWindowSize(w, &winW, &winH);
+    if (winW > 0 && winH > 0) {
+      double dx = xpos - self->lastMx_;
+      double dy = ypos - self->lastMy_;
+      // Map cursor movement directly to field space with 1:1 tracking
+      float fppX = float(self->nx_) / float(winW) / self->zoom_;
+      float fppY = float(self->ny_) / float(winH) / self->zoom_;
+      self->panX_ += float(dx) * fppX;
+      // In GLFW, y increases downward; in OpenGL field, y increases upward
+      self->panY_ -= float(dy) * fppY;
+      // Generous clamp bounds so user can pan across large/zoomed domains
+      float maxPanX = float(self->nx_) * 2.5f;
+      float maxPanY = float(self->ny_) * 2.5f;
+      self->panX_ = std::clamp(self->panX_, -maxPanX, maxPanX);
+      self->panY_ = std::clamp(self->panY_, -maxPanY, maxPanY);
+      self->lastMx_ = xpos;
+      self->lastMy_ = ypos;
+    }
   }
-  self->lastMouseX_ = xpos; self->lastMouseY_ = ypos;
+  self->lastMouseX_ = xpos;
+  self->lastMouseY_ = ypos;
 }
 
 FieldViewer::FieldViewer(int nx, int ny, int scale, const std::string &title)
@@ -175,40 +211,77 @@ bool FieldViewer::shouldClose() const { return glfwWindowShouldClose(window_); }
 void FieldViewer::pollEvents() { glfwPollEvents(); }
 
 void FieldViewer::setZoom(float z) {
-  zoom_ = std::clamp(z, 0.25f, 8.0f);
+  zoom_ = std::clamp(z, 0.20f, 16.0f);
 }
-void FieldViewer::resetView() { zoom_ = 1.0f; panX_=0; panY_=0; }
+void FieldViewer::resetView() { zoom_ = 1.0f; panX_ = 0.0f; panY_ = 0.0f; }
 
-void FieldViewer::screenToField(double sx, double sy, int ww, int wh, float &fx, float &fy) const {
-  double ndcX = (sx / double(ww)) * 2.0 - 1.0;
-  double ndcY = 1.0 - (sy / double(wh)) * 2.0;
-  double fxt = (ndcX + 1.0) * 0.5 * double(nx_);
-  double fyt = (ndcY + 1.0) * 0.5 * double(ny_);
+void FieldViewer::screenToField(double fbMx, double fbMy, int fbW, int fbH, float &fx, float &fy) const {
+  if (fbW <= 0 || fbH <= 0) { fx = 0; fy = 0; return; }
+  double orthoX = (fbMx / double(fbW)) * double(nx_);
+  double orthoY = (1.0 - fbMy / double(fbH)) * double(ny_);
   double cx = nx_ * 0.5, cy = ny_ * 0.5;
-  fx = float((fxt - cx - panX_) / zoom_ + cx);
-  fy = float((fyt - cy - panY_) / zoom_ + cy);
+  fx = float((orthoX - cx - panX_) / zoom_ + cx);
+  fy = float((orthoY - cy - panY_) / zoom_ + cy);
 }
 
 void FieldViewer::zoomAt(double mx, double my, float factor) {
-  int ww,wh; glfwGetFramebufferSize(window_,&ww,&wh);
-  float fx,fy; screenToField(mx,my,ww,wh,fx,fy);
-  float newZoom = std::clamp(zoom_ * factor, 0.25f, 8.0f);
-  if (std::abs(newZoom - zoom_) < 1e-4f) return;
-  // adjust pan so fx stays under cursor
-  double cx = nx_*0.5, cy=ny_*0.5;
-  double fxt = (fx - cx) * zoom_ + cx + panX_;
-  // fxt = (fx-cx)*newZoom + cx + newPanX  => newPan = fxt - (fx-cx)*newZoom - cx
-  panX_ = float(fxt - (fx - cx) * newZoom - cx);
-  double fyt = (fy - cy) * zoom_ + cy + panY_;
-  panY_ = float(fyt - (fy - cy) * newZoom - cy);
+  int winW, winH, fbW, fbH;
+  glfwGetWindowSize(window_, &winW, &winH);
+  glfwGetFramebufferSize(window_, &fbW, &fbH);
+  if (winW <= 0 || winH <= 0 || fbW <= 0 || fbH <= 0) return;
+
+  double scaleX = double(fbW) / double(winW);
+  double scaleY = double(fbH) / double(winH);
+  double fbMx = mx * scaleX;
+  double fbMy = my * scaleY;
+
+  float fx, fy;
+  screenToField(fbMx, fbMy, fbW, fbH, fx, fy);
+
+  float newZoom = std::clamp(zoom_ * factor, 0.20f, 16.0f);
+  if (std::abs(newZoom - zoom_) < 1e-5f) return;
+
+  // Keep point (fx, fy) fixed under cursor
+  double cx = nx_ * 0.5, cy = ny_ * 0.5;
+  panX_ = float((fx - cx) * (zoom_ - newZoom) + panX_);
+  panY_ = float((fy - cy) * (zoom_ - newZoom) + panY_);
   zoom_ = newZoom;
+
+  float maxPanX = float(nx_) * 2.5f;
+  float maxPanY = float(ny_) * 2.5f;
+  panX_ = std::clamp(panX_, -maxPanX, maxPanX);
+  panY_ = std::clamp(panY_, -maxPanY, maxPanY);
 }
 
-void FieldViewer::handleScroll(double yoff) {
-  if (yoff == 0) return;
-  double mx = lastMouseX_, my = lastMouseY_;
-  float factor = std::pow(1.15f, float(yoff));
-  zoomAt(mx, my, factor);
+void FieldViewer::handleScroll(double xoff, double yoff) {
+  if (xoff == 0 && yoff == 0) return;
+
+  bool shiftDown = (glfwGetKey(window_, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+                    glfwGetKey(window_, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS);
+
+  int winW, winH;
+  glfwGetWindowSize(window_, &winW, &winH);
+  if (winW <= 0 || winH <= 0) return;
+
+  // Trackpad 2-finger swipe / Shift-scroll pan
+  if (shiftDown || (std::abs(xoff) > std::abs(yoff) && std::abs(xoff) > 0.02)) {
+    float fppX = float(nx_) / float(winW) / zoom_;
+    float fppY = float(ny_) / float(winH) / zoom_;
+    float scrollPanSpeed = 10.0f;
+    double panDx = (shiftDown ? -yoff : xoff);
+    double panDy = (shiftDown ? 0.0 : yoff);
+    panX_ += float(panDx) * fppX * scrollPanSpeed;
+    panY_ += float(panDy) * fppY * scrollPanSpeed;
+    float maxPanX = float(nx_) * 2.5f;
+    float maxPanY = float(ny_) * 2.5f;
+    panX_ = std::clamp(panX_, -maxPanX, maxPanX);
+    panY_ = std::clamp(panY_, -maxPanY, maxPanY);
+  } else {
+    // Smooth trackpad / wheel zoom centered at cursor
+    double mx = lastMouseX_, my = lastMouseY_;
+    float factor = std::pow(1.08f, float(yoff));
+    zoomAt(mx, my, factor);
+  }
 }
 
 void FieldViewer::beginFieldTransform(int ww, int wh) {
@@ -225,10 +298,12 @@ void FieldViewer::beginFieldTransform(int ww, int wh) {
   glScalef(zoom_, zoom_, 1.0f);
   glTranslatef(-cx, -cy, 0.0f);
 }
+
 void FieldViewer::endFieldTransform() {
   glMatrixMode(GL_PROJECTION); glPopMatrix();
   glMatrixMode(GL_MODELVIEW); glPopMatrix();
 }
+
 void FieldViewer::beginUI(int ww, int wh) {
   glMatrixMode(GL_PROJECTION);
   glPushMatrix();
@@ -238,6 +313,7 @@ void FieldViewer::beginUI(int ww, int wh) {
   glPushMatrix();
   glLoadIdentity();
 }
+
 void FieldViewer::endUI() {
   glMatrixMode(GL_PROJECTION); glPopMatrix();
   glMatrixMode(GL_MODELVIEW); glPopMatrix();
@@ -320,6 +396,7 @@ void FieldViewer::drawRect(float x,float y,float w,float h,float r,float g,float
   glVertex2f(x,y); glVertex2f(x+w,y); glVertex2f(x+w,y+h); glVertex2f(x,y+h);
   glEnd();
 }
+
 void FieldViewer::drawRectBorder(float x,float y,float w,float h,float r,float g,float b){
   glColor3f(r,g,b);
   glLineWidth(1.0f);
@@ -327,6 +404,7 @@ void FieldViewer::drawRectBorder(float x,float y,float w,float h,float r,float g
   glVertex2f(x,y); glVertex2f(x+w,y); glVertex2f(x+w,y+h); glVertex2f(x,y+h);
   glEnd();
 }
+
 void FieldViewer::drawText(float x,float y,const char *text,float pixelSize){
   if (!text || !*text) return;
   float cx = x;
@@ -354,61 +432,100 @@ void FieldViewer::drawText(float x,float y,const char *text,float pixelSize){
     cx += 6*pixelSize;
   }
 }
+
 bool FieldViewer::drawButton(float x,float y,float w,float h,const char *label,bool hovered,bool pressed){
-  float r = hovered ? (pressed ? 0.20f : 0.28f) : 0.22f;
-  float g = r, b = r + 0.01f;
-  if (pressed && hovered) { r=0.18f; g=0.18f; b=0.19f; }
+  float r = hovered ? (pressed ? 0.20f : 0.32f) : 0.22f;
+  float g = r, b = r + 0.02f;
+  if (pressed && hovered) { r=0.18f; g=0.18f; b=0.20f; }
   drawRect(x,y,w,h,r,g,b,1.0f);
-  drawRectBorder(x,y,w,h,0.34f,0.34f,0.32f);
-  // center label
+  if (hovered) {
+    drawRectBorder(x,y,w,h,0.50f,0.50f,0.52f);
+  } else {
+    drawRectBorder(x,y,w,h,0.34f,0.34f,0.36f);
+  }
+  // Center label
   int len = int(std::strlen(label));
-  float textW = len * 6 * 1.25f;
+  float textScale = 1.35f;
+  float textW = len * 6 * textScale;
   float tx = x + (w - textW) * 0.5f;
-  float ty = y + (h - 7*1.25f)*0.5f - 1.0f;
-  glColor3f(0.96f,0.96f,0.94f);
-  drawText(tx, ty, label, 1.25f);
+  float ty = y + (h - 7*textScale)*0.5f - 1.0f;
+  if (pressed) { tx += 1.0f; ty -= 1.0f; }
+  if (hovered) {
+    glColor3f(1.0f, 1.0f, 0.98f);
+  } else {
+    glColor3f(0.88f, 0.88f, 0.86f);
+  }
+  drawText(tx, ty, label, textScale);
   return hovered;
 }
+
 bool FieldViewer::hitTest(float mx,float my,float x,float y,float w,float h){
   return mx>=x && mx<=x+w && my>=y && my<=y+h;
 }
 
-bool FieldViewer::drawControlBar(int ww,int wh,double mouseX,double mouseY,bool mousePressed,int particleCount,float speed,bool paused){
-  // pop field, push UI
+bool FieldViewer::drawControlBar(int ww, int wh, double mouseX, double mouseY, bool mousePressed,
+                                int particleCount, float speed, bool paused, const char *collModeStr){
   endFieldTransform();
-  beginUI(ww,wh);
+  beginUI(ww, wh);
 
-  double uiMx = mouseX;
-  double uiMy = double(wh) - mouseY; // bottom origin
+  // Convert mouseX, mouseY from window coords to exact framebuffer coords
+  int winW, winH;
+  glfwGetWindowSize(window_, &winW, &winH);
+  double scaleX = (winW > 0) ? (double(ww) / double(winW)) : 1.0;
+  double scaleY = (winH > 0) ? (double(wh) / double(winH)) : 1.0;
+  double fbMx = mouseX * scaleX;
+  double fbMy = mouseY * scaleY;
 
-  const float barH = 28.0f;
+  double uiMx = fbMx;
+  double uiMy = double(wh) - fbMy; // bottom origin
+
+  const float barH = controlBarHeight();
   float barY = float(wh) - barH;
 
-  // bar bg — matte dark, no gradient
-  drawRect(0, barY, float(ww), barH, 0.14f,0.14f,0.16f, 1.0f);
-  // bottom border
-  drawRect(0, barY, float(ww), 1.0f, 0.24f,0.24f,0.25f,1.0f);
+  // Bar background — matte dark neutral
+  drawRect(0, barY, float(ww), barH, 0.13f, 0.13f, 0.15f, 0.98f);
+  // Bottom border line
+  drawRect(0, barY, float(ww), 1.0f, 0.26f, 0.26f, 0.28f, 1.0f);
 
-  // layout
-  struct Btn { float x,w; const char* label; int id; };
-  float y = barY + 5.0f;
-  float h = 18.0f;
-  // Buttons: particles -500 -100 +100 +500 | speed- speed+ | zoom- zoom+ | reset | pause
+  // Buttons layout
+  struct Btn { float x, w; const char* label; int id; };
+  float h = 24.0f;
+  float y = barY + (barH - h) * 0.5f;
+
   std::vector<Btn> btns;
   float curX = 8.0f;
-  auto add = [&](float w_, const char* lab, int id){ btns.push_back({curX,w_,lab,id}); curX += w_ + 6.0f; };
-  add(44,"-500",0); add(44,"-100",1); add(44,"+100",2); add(44,"+500",3);
-  curX += 4;
-  add(36,"S-",4); add(36,"S+",5);
-  curX += 4;
-  add(32,"Z-",6); add(32,"Z+",7);
-  curX += 4;
-  add(40,"RST",8);
-  add(46, paused?"PLAY":"PAUSE",9);
+  auto add = [&](float w_, const char* lab, int id){
+    btns.push_back({curX, w_, lab, id});
+    curX += w_ + 5.0f;
+  };
+
+  // 1. Particle count adjustments
+  add(48, "-500", 0);
+  add(48, "-100", 1);
+  add(48, "+100", 2);
+  add(48, "+500", 3);
+  curX += 6.0f;
+
+  // 2. Speed controls — spacious and easy to click
+  add(56, "SPD -", 4);
+  add(56, "SPD +", 5);
+  curX += 6.0f;
+
+  // 3. Zoom controls
+  add(44, "Z -", 6);
+  add(44, "Z +", 7);
+  curX += 6.0f;
+
+  // 4. Reset view
+  add(52, "RESET", 8);
+  curX += 4.0f;
+
+  // 5. Play / Pause
+  add(56, paused ? "PLAY" : "PAUSE", 9);
 
   bool anyHover = false;
-  bool uiHover = uiMy >= barY && uiMy <= barY+barH;
-  // draw buttons and handle clicks
+  bool uiHover = uiMy >= barY && uiMy <= float(wh);
+
   for (auto &b: btns){
     bool hover = uiHover && hitTest(float(uiMx), float(uiMy), b.x, y, b.w, h);
     bool pressed = hover && mousePressed;
@@ -431,36 +548,39 @@ bool FieldViewer::drawControlBar(int ww,int wh,double mouseX,double mouseY,bool 
     }
   }
 
-  // status text to the right of buttons
-  curX += 8;
-  if (curX + 260 < ww){
-    char buf[96];
-    std::snprintf(buf,sizeof(buf),"%d PTS  SPD %.2f  Z %.2fX", particleCount, speed, zoom_);
-    glColor3f(0.72f,0.72f,0.70f);
-    drawText(curX, y+2, buf, 1.25f);
+  // Status text
+  curX += 12.0f;
+  char buf[128];
+  if (collModeStr && *collModeStr) {
+    std::snprintf(buf, sizeof(buf), "%d PTS  SPD %.2f  Z %.2fX  [%s]",
+                  particleCount, speed, zoom_, collModeStr);
+  } else {
+    std::snprintf(buf, sizeof(buf), "%d PTS  SPD %.2f  Z %.2fX",
+                  particleCount, speed, zoom_);
   }
+  glColor3f(0.75f, 0.75f, 0.73f);
+  drawText(curX, y + 4.0f, buf, 1.35f);
 
-  // hint for panning
-  if (!uiHover && ww > 500){
-    const char* hint = "SCROLL ZOOM  RMB DRAG PAN";
-    float hw = float(std::strlen(hint))*6*1.0f;
-    glColor3f(0.52f,0.52f,0.50f);
-    drawText(float(ww)-hw-8, y+2, hint, 1.0f);
+  // Right-aligned helper hint
+  const char *hint = "DRAG PAN   SCROLL ZOOM";
+  float hintW = float(std::strlen(hint)) * 6.0f * 1.15f;
+  if (float(ww) - hintW - 12.0f > curX + 220.0f) {
+    glColor3f(0.48f, 0.48f, 0.46f);
+    drawText(float(ww) - hintW - 12.0f, y + 5.0f, hint, 1.15f);
   }
 
   uiMouseDownPrev_ = mousePressed;
 
   endUI();
-  // restore field transform for endFrame
-  beginFieldTransform(ww,wh);
-  return anyHover;
+  beginFieldTransform(ww, wh);
+  return uiHover;
 }
 
 void FieldViewer::endFrame(){
-  // pop field transform pushed by beginFrame / drawControlBar
   endFieldTransform();
   glfwSwapBuffers(window_);
 }
+
 void FieldViewer::setTitle(const std::string &t){ glfwSetWindowTitle(window_, t.c_str()); }
 
 } // namespace cpu_lbm

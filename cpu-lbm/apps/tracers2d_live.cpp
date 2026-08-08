@@ -107,6 +107,7 @@ int main(int argc, char **argv) {
     };
     viewer.onTogglePause = [&](){ paused = !paused; std::printf("[pause] %s\n", paused?"paused":"running"); };
     viewer.onResetView = [&](){ std::printf("[view] reset\n"); };
+    viewer.onReseed = [&](){ tracers.reseed(uint32_t(std::rand())); std::printf("[tracers] reseeded\n"); };
 
     double lastTime = glfwGetTime();
     double lastFpsTime = lastTime;
@@ -204,7 +205,7 @@ int main(int argc, char **argv) {
       viewer.drawField(field);
       viewer.drawObstacles(obstacles);
       viewer.drawTracers(tracers);
-      viewer.drawControlBar(ww, wh, mx, my, leftDown, int(tracers.size()), dt*u0, paused);
+      viewer.drawControlBar(ww, wh, mx, my, leftDown, int(tracers.size()), dt*u0, paused, cpu_lbm::collModeName(collMode));
       viewer.endFrame();
 
       frames++;

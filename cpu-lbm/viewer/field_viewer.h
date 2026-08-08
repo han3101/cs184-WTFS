@@ -12,7 +12,7 @@ namespace cpu_lbm {
 
 // Phase 0b viewer — GLFW + legacy OpenGL (compatibility profile).
 // Linked ONLY by *_live apps so cpu_lbm_core stays headless/testable.
-// Added in 0b+: zoom/pan + flat control bar for particle count & speed.
+// Features: smooth trackpad pan/zoom + generous bounds + prominent control bar.
 // Keeps taste filter: matte neutrals, sharp 1px borders, no gradients/glow.
 class FieldViewer {
 public:
@@ -43,21 +43,25 @@ public:
   float zoom() const { return zoom_; }
   void setZoom(float z);
   void resetView();
-  void zoomAt(double mouseX, double mouseY, float factor); // mouse in framebuffer pixels
+  void zoomAt(double mouseX, double mouseY, float factor); // mouse in window/screen coords
+
+  float controlBarHeight() const { return 36.0f; } // height in framebuffer pixels
 
   // UI control bar — flat matte buttons, no gradients.
   // App wires callbacks so viewer stays decoupled from TracerSet ownership.
-  std::function<void(int)> onParticleDelta; // e.g. -100 / +100 / -500 / +500
-  std::function<void(float)> onSpeedDelta;  // multiply dt by factor (e.g. 0.8 / 1.25)
+  std::function<void(int)> onParticleDelta; // e.g. -500 / -100 / +100 / +500
+  std::function<void(float)> onSpeedDelta;  // multiply dt by factor (e.g. 0.85 / 1.18)
   std::function<void()> onResetView;
   std::function<void()> onTogglePause;
+  std::function<void()> onReseed;
 
   // Draw screen-space control bar; must be called between drawTracers and endFrame.
-  // ww,wh = framebuffer size, mouseX/Y in same coords, mousePressed = left down.
+  // ww,wh = framebuffer size, mouseX/Y in window coords, mousePressed = left down.
   // Returns true if mouse is over UI (so app can suppress panning).
   bool drawControlBar(int framebufferW, int framebufferH,
                       double mouseX, double mouseY, bool mousePressed,
-                      int particleCount, float speed, bool paused);
+                      int particleCount, float speed, bool paused,
+                      const char *collModeStr = nullptr);
 
   // Simple hit-test helper for app-level extensions
   static bool hitTest(float mx, float my, float x, float y, float w, float h);
@@ -70,7 +74,9 @@ private:
   bool isPanning_ = false;
   double lastMx_ = 0, lastMy_ = 0;
   double lastMouseX_ = 0, lastMouseY_ = 0;
-  bool lastMouseDown_ = false;
+  bool leftDown_ = false;
+  bool middleDown_ = false;
+  bool rightDown_ = false;
   bool uiMouseDownPrev_ = false;
 
   static void keyCallback(GLFWwindow *w, int key, int scancode, int action, int mods);
@@ -79,19 +85,19 @@ private:
   static void mouseButtonCallback(GLFWwindow *w, int button, int action, int mods);
   static void cursorPosCallback(GLFWwindow *w, double xpos, double ypos);
 
-  void handleScroll(double yoff);
+  void handleScroll(double xoff, double yoff);
   void beginFieldTransform(int ww, int wh);
   void endFieldTransform();
   void beginUI(int ww, int wh);
   void endUI();
   void drawRect(float x, float y, float w, float h, float r, float g, float b, float a = 1.0f);
   void drawRectBorder(float x, float y, float w, float h, float r, float g, float b);
-  void drawText(float x, float y, const char *text, float pixelSize = 1.5f);
+  void drawText(float x, float y, const char *text, float pixelSize = 1.35f);
   bool drawButton(float x, float y, float w, float h, const char *label,
                   bool hovered, bool pressed);
 
   // Convert framebuffer pixel (origin top-left from GLFW cursor) to field coords
-  void screenToField(double sx, double sy, int ww, int wh, float &fx, float &fy) const;
+  void screenToField(double fbMx, double fbMy, int fbW, int fbH, float &fx, float &fy) const;
 };
 
 } // namespace cpu_lbm
