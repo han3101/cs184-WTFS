@@ -1,7 +1,9 @@
 #pragma once
 #include "field.h"
 #include "tracers.h"
+#include "obstacle.h"
 #include <string>
+#include <vector>
 
 struct GLFWwindow;
 
@@ -26,6 +28,7 @@ public:
 
   void beginFrame();
   void drawField(const Field2D &field); // 0b: solid clear; field param kept for 0c drop-in
+  void drawObstacles(const std::vector<Obstacle> &obs);
   void drawTracers(const TracerSet &tracers);
   void endFrame();
 

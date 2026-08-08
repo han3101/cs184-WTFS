@@ -8,6 +8,7 @@
 #endif
 #include <cstdio>
 #include <stdexcept>
+#include <cmath>
 
 namespace cpu_lbm {
 
@@ -109,6 +110,46 @@ void FieldViewer::drawField(const Field2D & /*field*/) {
   glVertex2f(float(nx_) - 0.5f, float(ny_) - 0.5f);
   glVertex2f(0.5f, float(ny_) - 0.5f);
   glEnd();
+}
+
+void FieldViewer::drawObstacles(const std::vector<Obstacle> &obs) {
+  // Taste: flat, neutral, no purple gradient / glow / glass. Big block/circle as readable silhouettes.
+  for (auto &o : obs) {
+    if (o.type == Obstacle::CIRCLE) {
+      // Fill - warm mid-grey, matte
+      glColor3f(0.62f, 0.60f, 0.56f);
+      glBegin(GL_TRIANGLE_FAN);
+      glVertex2f(o.cx, o.cy);
+      const int segs = 48;
+      for (int i=0;i<=segs;++i) {
+        float a = float(i)/float(segs)*2.0f*3.14159265f;
+        glVertex2f(o.cx + std::cos(a)*o.r, o.cy + std::sin(a)*o.r);
+      }
+      glEnd();
+      // Outline - darker, crisp
+      glColor3f(0.22f, 0.22f, 0.20f);
+      glLineWidth(1.5f);
+      glBegin(GL_LINE_LOOP);
+      for (int i=0;i<segs;++i) {
+        float a = float(i)/float(segs)*2.0f*3.14159265f;
+        glVertex2f(o.cx + std::cos(a)*o.r, o.cy + std::sin(a)*o.r);
+      }
+      glEnd();
+      glLineWidth(1.0f);
+    } else {
+      float x0=o.cx-o.hx, x1=o.cx+o.hx, y0=o.cy-o.hy, y1=o.cy+o.hy;
+      glColor3f(0.62f, 0.60f, 0.56f);
+      glBegin(GL_QUADS);
+      glVertex2f(x0,y0); glVertex2f(x1,y0); glVertex2f(x1,y1); glVertex2f(x0,y1);
+      glEnd();
+      glColor3f(0.22f, 0.22f, 0.20f);
+      glLineWidth(1.5f);
+      glBegin(GL_LINE_LOOP);
+      glVertex2f(x0,y0); glVertex2f(x1,y0); glVertex2f(x1,y1); glVertex2f(x0,y1);
+      glEnd();
+      glLineWidth(1.0f);
+    }
+  }
 }
 
 void FieldViewer::drawTracers(const TracerSet &tracers) {

@@ -67,13 +67,23 @@ Columns `step,avg_x,avg_y,recycled,total_recycled` every 10 steps. Gate: exits `
 ./build/tracers2d_live
 ./build/tracers2d_live --nx 256 --ny 128 --particles 10000 --scale 3
 ./build/tracers2d_live --nx 512 --ny 256 --particles 20000 --u0 0.06 --scale 2
+
+# big obstacle (SDF) + collision — default is slip, big circle at center
+./build/tracers2d_live --circle 115 64 23
+./build/tracers2d_live --block 115 64 46 46           # center cx,cy + full size w,h
+./build/tracers2d_live --circle 80 64 18 --block 180 64 40 40  # multiple
+./build/tracers2d_live --no-obstacle                  # no obstacle (old 0b)
+./build/tracers2d_live --coll slip                    # slip (default): wind slides, keep tangent
+./build/tracers2d_live --coll bounce                  # elastic: v' = v -2(v·n)n
+./build/tracers2d_live --coll stick                   # no-slip visual: stops at wall
+./build/tracers2d_live --coll passive                 # push-out only (future LBM guard)
 ```
 
-Window: dark field `157×`? No — `nx*scale × ny*scale` pixels, particles stream L→R at `u0`, recycle at inlet visibly. Resize is safe (letterboxes, no crash). Title shows `FPS / ms / recycled/s / count`.
+Window: dark field `nx*scale × ny*scale` pixels, particles stream L→R at `u0`, recycle at inlet visibly. Obstacles are flat warm-grey silhouettes with crisp outline (no glow/gradient) drawn via `viewer/field_viewer::drawObstacles` from `src/obstacle.h` SDFs. Resize is safe (letterboxes, no crash). Title shows `FPS / ms / recycled/s / count / coll / obs`.
 
-Controls: `SPACE` pause/resume, `R` reseed, `+/-` (or `KP +/-`) add/remove 100 tracers (count decoupled), `ESC`/`Q` quit.
+Controls: `SPACE` pause/resume, `R` reseed, `+/-` (or `KP +/-`) add/remove 100 tracers (count decoupled), `C` cycle coll mode `slip→stick→bounce→passive`, `B` toggle `circle→block→none`, `ESC`/`Q` quit. All obstacles in lattice coords `[0,nx)×[0,ny)` — same SDF later generates `solidMask` for LBM `boundary.h:setB`.
 
-Gate 0b: window opens, constant-speed stream, recycle visible, stays >55 FPS at 10k points on integrated graphics, `+/-` and `R` live, resize does not crash.
+Gate 0b: window opens, constant-speed stream, recycle visible, obstacles deflect via SDF push + mode, stays >55 FPS at 10k points on integrated graphics, `+/-`/`R`/`C`/`B` live, resize does not crash.
 
 ### 5. Clean
 
@@ -85,10 +95,11 @@ rm -rf build out
 
 - ✅ `Field2D`/`Field3D` SoA + `y*nx+x` + bilinear sampling
 - ✅ `TracerSet` advection, inlet recycle, `y` wrap, `add`/`remove`
-- ✅ `tracers2d_headless` + `ctest` green
-- ✅ `viewer/field_viewer` + `tracers2d_live` — live window, same field/tracer loop
-- ⏳ `lattice.h` / `lbm.h` / `boundary.h` / `obstacle.h` / `voxelize.h` — Phase 0c (real LBM replaces `fillUniform`), not yet
+- ✅ `src/obstacle.h` — SDF `Circle`/`AABB` + `CollMode` `slip|stick|bounce|passive` (Phase 0b visual; 0c keeps passive guard)
+- ✅ `tracers2d_headless` + `ctest` green (`advect` overload keeps Gate 0a)
+- ✅ `viewer/field_viewer` + `tracers2d_live` — live window, same field/tracer loop, `drawObstacles` + `--circle/--block/--coll/--no-obstacle` + `C`/`B` keys
+- ⏳ `lattice.h` / `lbm.h` / `boundary.h` / `voxelize.h` — Phase 0c (real LBM replaces `fillUniform`), not yet
 
 ## Next
 
-Phase 0c: `lattice.h`/`units.h`/`lbm.h`/`boundary.h` — replace `fillUniform` with `lbm.step()`, tracers unchanged; viewer keeps the same API.
+Phase 0c: `lattice.h`/`units.h`/`lbm.h`/`boundary.h` — replace `fillUniform` with `lbm.step()`; tracers keep `advect(...,obstacles,passive)` as tunneling guard only (active `slip/bounce` removed, `sdf<0→solidMask` drives real `f_opp` bounce-back); viewer keeps same `drawObstacles` API.

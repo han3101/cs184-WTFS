@@ -66,9 +66,15 @@ ctest --test-dir cpu-lbm/build --output-on-failure
 # viewer (Gate 0b) — needs GLFW + OpenGL; `brew install glfw` on macOS
 ./cpu-lbm/build/tracers2d_live
 ./cpu-lbm/build/tracers2d_live --nx 256 --ny 128 --particles 10000 --scale 3
+# big obstacle + collision (SDF) — default slip, big circle at center
+./cpu-lbm/build/tracers2d_live --circle 115 64 23
+./cpu-lbm/build/tracers2d_live --block 115 64 46 46
+./cpu-lbm/build/tracers2d_live --circle 80 64 18 --block 180 64 40 40
+./cpu-lbm/build/tracers2d_live --coll bounce   # or slip|stick|passive
+./cpu-lbm/build/tracers2d_live --no-obstacle
 ```
 
-Headless CSV: `step,avg_x,avg_y,recycled,total_recycled` (Gate 0a: `ctest` green, stable count, `total_recycled>0` when `steps > nx/0.05`). Viewer: dark field + warm-white points streaming L→R, recycle visible, resize safe. Controls `SPACE` pause, `R` reseed, `+/-` add/remove 100, `ESC`/`Q` quit. Full flags in [cpu-lbm/README.md](cpu-lbm/README.md). Real LBM (`cyl2d_*`, `tunnel3d`) still not built — Phase 0c.
+Headless CSV: `step,avg_x,avg_y,recycled,total_recycled` (Gate 0a: `ctest` green, stable count, `total_recycled>0` when `steps > nx/0.05`). Viewer: dark field + warm-white points streaming L→R, warm-grey block/circle obstacle, recycle visible, resize safe. Controls `SPACE` pause, `R` reseed, `+/-` add/remove 100, `C` cycle `slip→stick→bounce→passive`, `B` toggle `circle→block→none`, `ESC`/`Q` quit. Full flags in [cpu-lbm/README.md](cpu-lbm/README.md). Real LBM (`cyl2d_*`, `tunnel3d`) still not built — Phase 0c.
 
 ## Build & run (legacy PBF — frozen)
 

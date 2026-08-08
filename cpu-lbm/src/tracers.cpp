@@ -37,25 +37,87 @@ void TracerSet::recycleOne(Tracer &t) {
 }
 
 int TracerSet::advect(const Field2D &field, float dt) {
+  return advect(field, dt, {}, CollMode::Passive);
+}
+
+int TracerSet::advect(const Field2D &field, float dt,
+                      const std::vector<Obstacle>& obstacles, CollMode mode) {
   int recycled = 0;
+  const float eps = 1e-3f;
   for (auto &t : tracers) {
     float u, v;
     field.sample(t.x, t.y, u, v);
-    t.x += u * dt;
-    t.y += v * dt;
+    float nx_ = t.x + u * dt;
+    float ny_ = t.y + v * dt;
 
-    // Handle spanwise bounds — clamp / wrap keeps tracers in domain for uniform flow
-    // (with LBM and obstacles later, wall bounce-back will be handled by the field)
+    // Obstacle collision — SDF push + mode-dependent velocity response
+    if (!obstacles.empty()) {
+      // Iterate a few times in case push from one obstacle puts inside another
+      for (int iter = 0; iter < 3; ++iter) {
+        bool hit = false;
+        for (auto &obs : obstacles) {
+          float s = sdf(obs, nx_, ny_);
+          if (s < 0.0f) {
+            hit = true;
+            float n_x, n_y;
+            sdfNormal(obs, nx_, ny_, n_x, n_y);
+            float push = -s + eps;
+            nx_ += n_x * push;
+            ny_ += n_y * push;
+
+            if (mode == CollMode::Slip) {
+              float dot = u * n_x + v * n_y;
+              if (dot < 0.0f) {
+                // remove inward normal, keep tangent for subsequent checks / next frame
+                u -= dot * n_x;
+                v -= dot * n_y;
+              }
+            } else if (mode == CollMode::Stick) {
+              // no-slip visual: kill all velocity at wall for this step
+              nx_ -= u * dt * 0.5f;
+              ny_ -= v * dt * 0.5f;
+              // nudge again to stay outside after revert
+              nx_ += n_x * eps;
+              ny_ += n_y * eps;
+              u = 0.0f; v = 0.0f;
+            } else if (mode == CollMode::Bounce) {
+              float dot = u * n_x + v * n_y;
+              float ur = u - 2.0f * dot * n_x;
+              float vr = v - 2.0f * dot * n_y;
+              u = ur; v = vr;
+              // separate a bit along reflected direction to avoid re-hit
+              nx_ += u * dt * 0.1f;
+              ny_ += v * dt * 0.1f;
+            } else {
+              // Passive: push only, velocity unchanged
+            }
+            break; // re-check all obstacles from start
+          }
+        }
+        if (!hit) break;
+      }
+    }
+
+    t.x = nx_;
+    t.y = ny_;
+
+    // Handle spanwise bounds — wrap keeps tracers in domain for uniform flow
     if (t.y < 0.0f) t.y += float(ny);
     if (t.y >= float(ny)) t.y -= float(ny);
 
-    // Left boundary (should rarely happen with positive u, but handle anyway)
+    // Left boundary
     if (t.x < 0.0f) t.x += float(nx);
 
     // Right outlet → recycle to inlet
     if (t.x >= float(nx)) {
       recycleOne(t);
       recycled++;
+    } else if (!obstacles.empty()) {
+      // Safety: if still inside after push (high dt tunneling), recycle to inlet
+      // to avoid particles trapped inside big block
+      for (auto &obs : obstacles) {
+        if (isInside(obs, t.x, t.y)) { recycleOne(t); recycled++; break; }
+      }
     }
   }
   return recycled;

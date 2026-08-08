@@ -1,5 +1,6 @@
 #pragma once
 #include "field.h"
+#include "obstacle.h"
 #include <vector>
 #include <random>
 #include <cstdint>
@@ -32,6 +33,13 @@ public:
   // Recycles any tracer that exits the right boundary (x >= nx) back to inlet (x ~ 0).
   // Returns number recycled this step.
   int advect(const Field2D &field, float dt);
+  // Advect with obstacle collision. Obstacles in lattice coords. Mode controls response.
+  // - Passive: push-out only (future LBM guard, 0c)
+  // - Slip: cancel inward normal, keep tangent (0b wind visual, default)
+  // - Stick: zero velocity at wall
+  // - Bounce: elastic reflection v' = v -2(v·n)n
+  int advect(const Field2D &field, float dt,
+             const std::vector<Obstacle>& obstacles, CollMode mode);
 
   // Add/remove tracers (proves count is decoupled)
   void add(int n);
