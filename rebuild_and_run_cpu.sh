@@ -24,7 +24,7 @@ WATCH=0
 APP_ARGS=()
 ARGS=("$@")
 HAS_SEP=0
-for a in "${ARGS[@]:-}"; do
+for a in "${ARGS[@]}"; do
   if [[ "$a" == "--" ]]; then HAS_SEP=1; break; fi
 done
 
@@ -33,16 +33,16 @@ if [[ $HAS_SEP -eq 1 ]]; then
   BEFORE=()
   AFTER=()
   SEEN=0
-  for a in "${ARGS[@]:-}"; do
+  for a in "${ARGS[@]}"; do
     if [[ $SEEN -eq 0 && "$a" == "--" ]]; then SEEN=1; continue; fi
     if [[ $SEEN -eq 0 ]]; then BEFORE+=("$a"); else AFTER+=("$a"); fi
   done
-  for b in "${BEFORE[@]:-}"; do
+  for b in "${BEFORE[@]}"; do
     if [[ "$b" == "--watch" ]]; then WATCH=1; fi
   done
-  APP_ARGS=("${AFTER[@]:-}")
+  APP_ARGS=("${AFTER[@]}")
 else
-  for a in "${ARGS[@]:-}"; do
+  for a in "${ARGS[@]}"; do
     if [[ "$a" == "--watch" ]]; then WATCH=1; fi
   done
 fi
@@ -64,9 +64,10 @@ launch() {
     echo "   Linux: sudo apt install libglfw3-dev libgl-dev"
     return 1
   fi
-  echo "==> launching $BIN ${APP_ARGS[*]:-}"
+  echo "==> launching $BIN ${APP_ARGS[*]}"
   # use exec so Ctrl-C goes to viewer when not in watch mode
-  exec "$BIN" "${APP_ARGS[@]:-}"
+  # shellcheck: empty APP_ARGS expands to nothing (not a single empty arg) with this form
+  exec "$BIN" "${APP_ARGS[@]}"
 }
 
 # Non-watch: build once and exec viewer (replaces this shell)
@@ -85,14 +86,14 @@ mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; 
 if command -v inotifywait >/dev/null 2>&1; then
   echo "    using inotifywait (Linux)"
   build_once
-  "$BIN" "${APP_ARGS[@]:-}" &
+  "$BIN" "${APP_ARGS[@]}" &
   APP_PID=$!
   trap 'kill $APP_PID 2>/dev/null || true; exit 0' INT TERM
   while inotifywait -q -r -e modify,create,delete,move "$SRC/src" "$SRC/viewer" "$SRC/apps" "$SRC/CMakeLists.txt" 2>/dev/null; do
     echo ""; echo "--- change detected, rebuilding ---"
     kill $APP_PID 2>/dev/null || true; wait $APP_PID 2>/dev/null || true
     if build_once; then
-      "$BIN" "${APP_ARGS[@]:-}" &
+      "$BIN" "${APP_ARGS[@]}" &
       APP_PID=$!
     else
       echo "!! build failed — waiting for next change..."
@@ -101,7 +102,7 @@ if command -v inotifywait >/dev/null 2>&1; then
 elif command -v fswatch >/dev/null 2>&1; then
   echo "    using fswatch (macOS: brew install fswatch)"
   build_once
-  "$BIN" "${APP_ARGS[@]:-}" &
+  "$BIN" "${APP_ARGS[@]}" &
   APP_PID=$!
   trap 'kill $APP_PID 2>/dev/null || true; exit 0' INT TERM
   # -r recursive, -0 null-delimited
@@ -109,7 +110,7 @@ elif command -v fswatch >/dev/null 2>&1; then
     echo ""; echo "--- change detected, rebuilding ---"
     kill $APP_PID 2>/dev/null || true; wait $APP_PID 2>/dev/null || true
     if build_once; then
-      "$BIN" "${APP_ARGS[@]:-}" &
+      "$BIN" "${APP_ARGS[@]}" &
       APP_PID=$!
     else
       echo "!! build failed — waiting for next change..."
