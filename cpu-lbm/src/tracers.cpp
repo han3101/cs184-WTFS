@@ -8,7 +8,12 @@ void TracerSet::init(int n, int nx_, int ny_, uint32_t seed) {
   rng.seed(seed);
   totalRecycled = 0;
   tracers.resize(size_t(n));
-  std::uniform_real_distribution<float> distX(0.0f, float(nx));
+  // Start all particles at the inlet (left edge) so wind is visibly
+  // entering from the left rather than being pre-filled across the domain.
+  // x in [0,1) gives a thin vertical sheet; y uniform across height.
+  // Recycle uses the same inlet range, so steady-state becomes uniform
+  // only through obstacle-induced spreading and staggered recycling.
+  std::uniform_real_distribution<float> distX(0.0f, 1.0f);
   std::uniform_real_distribution<float> distY(0.0f, float(ny));
   for (auto &t : tracers) {
     t.x = distX(rng);
@@ -19,7 +24,7 @@ void TracerSet::init(int n, int nx_, int ny_, uint32_t seed) {
 void TracerSet::reseed(uint32_t seed) {
   rng.seed(seed);
   totalRecycled = 0;
-  std::uniform_real_distribution<float> distX(0.0f, float(nx));
+  std::uniform_real_distribution<float> distX(0.0f, 1.0f);
   std::uniform_real_distribution<float> distY(0.0f, float(ny));
   for (auto &t : tracers) {
     t.x = distX(rng);
@@ -125,7 +130,8 @@ int TracerSet::advect(const Field2D &field, float dt,
 
 void TracerSet::add(int n) {
   if (n <= 0) return;
-  std::uniform_real_distribution<float> distX(0.0f, float(nx));
+  // New particles enter at the inlet as well, consistent with left-to-right wind
+  std::uniform_real_distribution<float> distX(0.0f, 1.0f);
   std::uniform_real_distribution<float> distY(0.0f, float(ny));
   size_t old = tracers.size();
   tracers.resize(old + size_t(n));
