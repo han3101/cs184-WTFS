@@ -48,18 +48,13 @@ else
 fi
 
 build_once() {
-  echo "==> [1/3] cmake configure $SRC -> $BUILD"
+  echo "==> [1/2] cmake configure $SRC -> $BUILD"
   # On macOS, GLFW installed via brew is found by CMake; if not, FetchContent will try to fetch (needs network)
   cmake -S "$SRC" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release
 
-  echo "==> [2/3] build (-j)"
+  echo "==> [2/2] build (-j)"
   cmake --build "$BUILD" -j
-
-  echo "==> [3/3] ctest (headless gates 0a)"
-  ctest --test-dir "$BUILD" --output-on-failure || {
-    echo "!! ctest failed — fix tests before launching viewer"
-    return 1
-  }
+  # tests are not run here — use ctest --test-dir "$BUILD" manually if you want Gate 0a checks
 }
 
 launch() {

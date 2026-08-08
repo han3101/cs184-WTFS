@@ -75,15 +75,15 @@ int main() {
     check(ts.data()[0].y >= 0.0f && ts.data()[0].y < 32.0f, "y wrap");
   }
 
-  // Stats monotonic (smoke)
+  // Stats monotonic (smoke) — inlet sheet now starts at x∈[0,1), so need nx/u steps to reach outlet (~2560 for nx=128)
   {
     Field2D f(128, 64);
     f.fillUniform(0.05f, 0.0f);
     TracerSet ts(5000, 128, 64, 42);
     auto s0 = ts.stats();
-    for (int i = 0; i < 100; ++i) ts.advect(f, 1.0f);
+    for (int i = 0; i < 3000; ++i) ts.advect(f, 1.0f);
     auto s1 = ts.stats();
-    // avg_x may wrap due to recycling, but total recycled should be >0
+    // avg_x may wrap due to recycling, but total recycled should be >0 after enough steps
     check(s1.recycled > s0.recycled, "stats recycled monotonic");
   }
 
