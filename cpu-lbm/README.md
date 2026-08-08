@@ -65,25 +65,31 @@ Columns `step,avg_x,avg_y,recycled,total_recycled` every 10 steps. Gate: exits `
 
 ```sh
 ./build/tracers2d_live
-./build/tracers2d_live --nx 256 --ny 128 --particles 10000 --scale 3
-./build/tracers2d_live --nx 512 --ny 256 --particles 20000 --u0 0.06 --scale 2
+./build/tracers2d_live --nx 256 --ny 128 --batch 300 --interval 0.30 --scale 3
+./build/tracers2d_live --batch 500 --freq 0.20 --stream            # continuous stream mode
+./build/tracers2d_live --nx 512 --ny 256 --batch 500 --interval 0.25 --u0 0.06 --scale 2
 
 # big obstacle (SDF) + collision — default is slip, big circle at center
 ./build/tracers2d_live --circle 115 64 23
 ./build/tracers2d_live --block 115 64 46 46           # center cx,cy + full size w,h
 ./build/tracers2d_live --circle 80 64 18 --block 180 64 40 40  # multiple
-./build/tracers2d_live --no-obstacle                  # no obstacle (old 0b)
+./build/tracers2d_live --no-obstacle                  # no obstacle
 ./build/tracers2d_live --coll slip                    # slip (default): wind slides, keep tangent
 ./build/tracers2d_live --coll bounce                  # elastic: v' = v -2(v·n)n
 ./build/tracers2d_live --coll stick                   # no-slip visual: stops at wall
 ./build/tracers2d_live --coll passive                 # push-out only (future LBM guard)
 ```
 
-Window: dark field `nx*scale × ny*scale` pixels, particles enter as a thin inlet sheet at `x∈[0,1)` and stream L→R at `u0` (`SPD = u0·dt`), recycle at inlet visibly. New particles from top-bar / `KP +/-` also enter at inlet. Obstacles are flat warm-grey silhouettes with crisp outline (no glow/gradient) drawn via `viewer/field_viewer::drawObstacles` from `src/obstacle.h` SDFs. Resize is safe (letterboxes, no crash). Zoom/pan: scroll zooms to cursor, RMB-drag pans, `RST` resets. Title shows `PTS / SPD / Z / FPS / ms / recycled/s / count / coll / obs`.
+Window: dark field `nx*scale × ny*scale` pixels, particles emit in clean staggered pulses (default **300 particles every 0.30 seconds**) entering as inlet sheets at `x∈[0,1)` that stream L→R at `u0` (`SPD = u0·dt`) around obstacles and exit the domain cleanly.
 
-Controls: `SPACE` pause/resume, `R` reseed, keypad `+/-` add/remove 100 tracers (or top-bar `-500/-100/+100/+500`), `S-/S+` (top-bar or `[/]`) speed `dt*=0.85/1.18`, `Z-/Z+` (top-bar or `-/=`) zoom, `C` cycle coll mode `slip→stick→bounce→passive`, `B` toggle `circle→block→none`, `0`/`RST` reset view, `ESC`/`Q` quit. All obstacles in lattice coords `[0,nx)×[0,ny)` — same SDF later generates `solidMask` for LBM `boundary.h:setB`.
-
-Gate 0b: window opens, constant-speed stream, recycle visible, obstacles deflect via SDF push + mode, stays >55 FPS at 10k points on integrated graphics, `+/-`/`R`/`C`/`B` live, resize does not crash.
+Live controls:
+- **PULSE/STREAM**: toggle between periodic pulsed wave packets and continuous stream
+- **BATCH - / +** (or `P / Shift+P`): change particles per pulse (±50 particles)
+- **FREQ - / +** (or `I / Shift+I`): change interval between pulses (±0.05s)
+- **BURST** (or `E`): emit an immediate batch of particles
+- **SPD - / +** (or `[ / ]`): flow speed scale
+- **Mouse / Trackpad**: 1-finger / left-drag pans with 1:1 cursor lock; 2-finger scroll zooms at cursor; Shift-scroll pans
+- **SPACE** pause/resume, **R** clear & reseed, **C** cycle collision mode, **B** toggle obstacle, **0 / RESET** reset view, **ESC / Q** quit.
 
 ### 5. Quick dev loop — `rebuild_and_run_cpu.sh` (macOS + Linux)
 

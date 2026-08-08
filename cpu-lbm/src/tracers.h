@@ -4,6 +4,7 @@
 #include <vector>
 #include <random>
 #include <cstdint>
+#include <algorithm>
 
 namespace cpu_lbm {
 
@@ -20,7 +21,8 @@ struct TracerStats {
 
 // Massless tracers advected by Field2D.
 // Count is a pure rendering knob — never feeds back into the field.
-// Sampling uses Field2D::sample (bilinear) so tracers see a smooth field.
+// Supports both continuous stream recycling and periodic pulsed wave emission
+// (e.g. 300 particles every 0.3s) with live adjustable frequency and batch size.
 class TracerSet {
 public:
   TracerSet() = default;
@@ -28,20 +30,36 @@ public:
 
   void init(int n, int nx_, int ny_, uint32_t seed = 42);
   void reseed(uint32_t seed);
+  void clear();
+
+  // Periodic pulsed emission configuration (default: 300 particles every 0.3s)
+  void setEmitConfig(int count, float intervalSec, bool periodic = true);
+  int emitCount() const { return emitCount_; }
+  float emitInterval() const { return emitInterval_; }
+  bool periodicEmission() const { return periodicEmission_; }
+
+  void setEmitCount(int count) { emitCount_ = std::max(1, count); }
+  void setEmitInterval(float intervalSec) { emitInterval_ = std::clamp(intervalSec, 0.02f, 10.0f); }
+  void setPeriodicEmission(bool enable) { periodicEmission_ = enable; }
+  void togglePeriodicEmission() { periodicEmission_ = !periodicEmission_; }
+
+  int maxTracers() const { return maxTracers_; }
+  void setMaxTracers(int maxCount) { maxTracers_ = std::max(100, maxCount); }
+
+  // Step emission timer by realDt (seconds), emits emitCount_ particles whenever timer fires.
+  // Returns number of new particles emitted.
+  int stepEmission(float dtSec);
+
+  // Emit an immediate burst of count particles at the inlet [0, 1) x [0, ny)
+  int emitBurst(int count);
 
   // Advect all tracers by dt using velocity sampled from field.
-  // Recycles any tracer that exits the right boundary (x >= nx) back to inlet (x ~ 0).
-  // Returns number recycled this step.
+  // Recycles or removes exiting tracers according to periodicEmission mode.
   int advect(const Field2D &field, float dt);
-  // Advect with obstacle collision. Obstacles in lattice coords. Mode controls response.
-  // - Passive: push-out only (future LBM guard, 0c)
-  // - Slip: cancel inward normal, keep tangent (0b wind visual, default)
-  // - Stick: zero velocity at wall
-  // - Bounce: elastic reflection v' = v -2(v·n)n
   int advect(const Field2D &field, float dt,
              const std::vector<Obstacle>& obstacles, CollMode mode);
 
-  // Add/remove tracers (proves count is decoupled)
+  // Add/remove tracers manually
   void add(int n);
   void remove(int n);
 
@@ -57,6 +75,13 @@ private:
   std::vector<Tracer> tracers;
   std::mt19937 rng;
   uint64_t totalRecycled = 0;
+
+  int emitCount_ = 300;           // default: 300 particles per iteration
+  float emitInterval_ = 0.30f;     // default: every 0.3 seconds
+  float emitTimer_ = 0.0f;
+  bool periodicEmission_ = false;  // false for classic headless/test, enabled in live viewer
+  int maxTracers_ = 50000;
+
   void recycleOne(Tracer &t);
 };
 

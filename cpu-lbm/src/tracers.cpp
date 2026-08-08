@@ -7,12 +7,8 @@ void TracerSet::init(int n, int nx_, int ny_, uint32_t seed) {
   nx = nx_; ny = ny_;
   rng.seed(seed);
   totalRecycled = 0;
+  emitTimer_ = 0.0f;
   tracers.resize(size_t(n));
-  // Start all particles at the inlet (left edge) so wind is visibly
-  // entering from the left rather than being pre-filled across the domain.
-  // x in [0,1) gives a thin vertical sheet; y uniform across height.
-  // Recycle uses the same inlet range, so steady-state becomes uniform
-  // only through obstacle-induced spreading and staggered recycling.
   std::uniform_real_distribution<float> distX(0.0f, 1.0f);
   std::uniform_real_distribution<float> distY(0.0f, float(ny));
   for (auto &t : tracers) {
@@ -24,6 +20,7 @@ void TracerSet::init(int n, int nx_, int ny_, uint32_t seed) {
 void TracerSet::reseed(uint32_t seed) {
   rng.seed(seed);
   totalRecycled = 0;
+  emitTimer_ = 0.0f;
   std::uniform_real_distribution<float> distX(0.0f, 1.0f);
   std::uniform_real_distribution<float> distY(0.0f, float(ny));
   for (auto &t : tracers) {
@@ -32,8 +29,48 @@ void TracerSet::reseed(uint32_t seed) {
   }
 }
 
+void TracerSet::clear() {
+  tracers.clear();
+  emitTimer_ = 0.0f;
+}
+
+void TracerSet::setEmitConfig(int count, float intervalSec, bool periodic) {
+  emitCount_ = std::max(1, count);
+  emitInterval_ = std::clamp(intervalSec, 0.02f, 10.0f);
+  periodicEmission_ = periodic;
+}
+
+int TracerSet::emitBurst(int count) {
+  if (count <= 0 || ny <= 0) return 0;
+  if (int(tracers.size()) + count > maxTracers_) {
+    int overflow = int(tracers.size()) + count - maxTracers_;
+    if (overflow > 0 && overflow <= int(tracers.size())) {
+      tracers.erase(tracers.begin(), tracers.begin() + overflow);
+    }
+  }
+  std::uniform_real_distribution<float> distX(0.0f, 1.0f);
+  std::uniform_real_distribution<float> distY(0.0f, float(ny));
+  size_t oldSize = tracers.size();
+  tracers.resize(oldSize + size_t(count));
+  for (size_t i = oldSize; i < tracers.size(); ++i) {
+    tracers[i].x = distX(rng);
+    tracers[i].y = distY(rng);
+  }
+  return count;
+}
+
+int TracerSet::stepEmission(float dtSec) {
+  if (!periodicEmission_ || emitInterval_ <= 0.0f) return 0;
+  emitTimer_ += dtSec;
+  int emitted = 0;
+  while (emitTimer_ >= emitInterval_) {
+    emitTimer_ -= emitInterval_;
+    emitted += emitBurst(emitCount_);
+  }
+  return emitted;
+}
+
 void TracerSet::recycleOne(Tracer &t) {
-  // Place at inlet with a small random offset so particles don't start on a perfect line
   std::uniform_real_distribution<float> distX(0.0f, 1.0f);
   std::uniform_real_distribution<float> distY(0.0f, float(ny));
   t.x = distX(rng);
@@ -49,7 +86,10 @@ int TracerSet::advect(const Field2D &field, float dt,
                       const std::vector<Obstacle>& obstacles, CollMode mode) {
   int recycled = 0;
   const float eps = 1e-3f;
-  for (auto &t : tracers) {
+  size_t writeIdx = 0;
+
+  for (size_t i = 0; i < tracers.size(); ++i) {
+    auto t = tracers[i];
     float u, v;
     field.sample(t.x, t.y, u, v);
     float nx_ = t.x + u * dt;
@@ -57,7 +97,6 @@ int TracerSet::advect(const Field2D &field, float dt,
 
     // Obstacle collision — SDF push + mode-dependent velocity response
     if (!obstacles.empty()) {
-      // Iterate a few times in case push from one obstacle puts inside another
       for (int iter = 0; iter < 3; ++iter) {
         bool hit = false;
         for (auto &obs : obstacles) {
@@ -73,15 +112,12 @@ int TracerSet::advect(const Field2D &field, float dt,
             if (mode == CollMode::Slip) {
               float dot = u * n_x + v * n_y;
               if (dot < 0.0f) {
-                // remove inward normal, keep tangent for subsequent checks / next frame
                 u -= dot * n_x;
                 v -= dot * n_y;
               }
             } else if (mode == CollMode::Stick) {
-              // no-slip visual: kill all velocity at wall for this step
               nx_ -= u * dt * 0.5f;
               ny_ -= v * dt * 0.5f;
-              // nudge again to stay outside after revert
               nx_ += n_x * eps;
               ny_ += n_y * eps;
               u = 0.0f; v = 0.0f;
@@ -90,13 +126,10 @@ int TracerSet::advect(const Field2D &field, float dt,
               float ur = u - 2.0f * dot * n_x;
               float vr = v - 2.0f * dot * n_y;
               u = ur; v = vr;
-              // separate a bit along reflected direction to avoid re-hit
               nx_ += u * dt * 0.1f;
               ny_ += v * dt * 0.1f;
-            } else {
-              // Passive: push only, velocity unchanged
             }
-            break; // re-check all obstacles from start
+            break;
           }
         }
         if (!hit) break;
@@ -106,39 +139,50 @@ int TracerSet::advect(const Field2D &field, float dt,
     t.x = nx_;
     t.y = ny_;
 
-    // Handle spanwise bounds — wrap keeps tracers in domain for uniform flow
+    // Spanwise boundary wrapping
     if (t.y < 0.0f) t.y += float(ny);
     if (t.y >= float(ny)) t.y -= float(ny);
-
-    // Left boundary
     if (t.x < 0.0f) t.x += float(nx);
 
-    // Right outlet → recycle to inlet
+    // Outlet check
     if (t.x >= float(nx)) {
-      recycleOne(t);
-      recycled++;
+      if (periodicEmission_) {
+        // In periodic pulsed wave mode: particle exited outlet
+        recycled++;
+        totalRecycled++;
+        continue; // drops exited particle, keeping clean wavefronts
+      } else {
+        recycleOne(t);
+        recycled++;
+      }
     } else if (!obstacles.empty()) {
-      // Safety: if still inside after push (high dt tunneling), recycle to inlet
-      // to avoid particles trapped inside big block
+      bool trapped = false;
       for (auto &obs : obstacles) {
-        if (isInside(obs, t.x, t.y)) { recycleOne(t); recycled++; break; }
+        if (isInside(obs, t.x, t.y)) {
+          trapped = true;
+          break;
+        }
+      }
+      if (trapped) {
+        if (periodicEmission_) {
+          continue; // drop trapped particle in pulse mode
+        } else {
+          recycleOne(t);
+          recycled++;
+        }
       }
     }
+
+    tracers[writeIdx++] = t;
   }
+
+  tracers.resize(writeIdx);
   return recycled;
 }
 
 void TracerSet::add(int n) {
   if (n <= 0) return;
-  // New particles enter at the inlet as well, consistent with left-to-right wind
-  std::uniform_real_distribution<float> distX(0.0f, 1.0f);
-  std::uniform_real_distribution<float> distY(0.0f, float(ny));
-  size_t old = tracers.size();
-  tracers.resize(old + size_t(n));
-  for (size_t i = old; i < tracers.size(); ++i) {
-    tracers[i].x = distX(rng);
-    tracers[i].y = distY(rng);
-  }
+  emitBurst(n);
 }
 
 void TracerSet::remove(int n) {

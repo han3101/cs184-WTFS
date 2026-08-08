@@ -464,7 +464,9 @@ bool FieldViewer::hitTest(float mx,float my,float x,float y,float w,float h){
 }
 
 bool FieldViewer::drawControlBar(int ww, int wh, double mouseX, double mouseY, bool mousePressed,
-                                int particleCount, float speed, bool paused, const char *collModeStr){
+                                int particleCount, float speed, bool paused,
+                                int batchCount, float intervalSec,
+                                bool pulseMode, const char *collModeStr){
   endFieldTransform();
   beginUI(ww, wh);
 
@@ -499,29 +501,30 @@ bool FieldViewer::drawControlBar(int ww, int wh, double mouseX, double mouseY, b
     curX += w_ + 5.0f;
   };
 
-  // 1. Particle count adjustments
-  add(48, "-500", 0);
-  add(48, "-100", 1);
-  add(48, "+100", 2);
-  add(48, "+500", 3);
-  curX += 6.0f;
+  // 1. Mode toggle: PULSE vs STREAM
+  add(56, pulseMode ? "PULSE" : "STREAM", 0);
 
-  // 2. Speed controls — spacious and easy to click
-  add(56, "SPD -", 4);
-  add(56, "SPD +", 5);
-  curX += 6.0f;
-
-  // 3. Zoom controls
-  add(44, "Z -", 6);
-  add(44, "Z +", 7);
-  curX += 6.0f;
-
-  // 4. Reset view
-  add(52, "RESET", 8);
+  // 2. Batch size: BATCH - and BATCH + (changes particles per pulse)
+  add(54, "BATCH -", 1);
+  add(54, "BATCH +", 2);
   curX += 4.0f;
 
-  // 5. Play / Pause
-  add(56, paused ? "PLAY" : "PAUSE", 9);
+  // 3. Frequency / Interval: FREQ - and FREQ + (changes time between pulses)
+  add(52, "FREQ -", 3);
+  add(52, "FREQ +", 4);
+  curX += 4.0f;
+
+  // 4. Flow speed: SPD - and SPD +
+  add(50, "SPD -", 5);
+  add(50, "SPD +", 6);
+  curX += 4.0f;
+
+  // 5. Emit manual burst
+  add(50, "BURST", 7);
+
+  // 6. Reset view & pause/play
+  add(50, "RESET", 8);
+  add(52, paused ? "PLAY" : "PAUSE", 9);
 
   bool anyHover = false;
   bool uiHover = uiMy >= barY && uiMy <= float(wh);
@@ -534,38 +537,38 @@ bool FieldViewer::drawControlBar(int ww, int wh, double mouseX, double mouseY, b
     bool clicked = hover && mousePressed && !uiMouseDownPrev_;
     if (clicked){
       switch(b.id){
-        case 0: if(onParticleDelta) onParticleDelta(-500); break;
-        case 1: if(onParticleDelta) onParticleDelta(-100); break;
-        case 2: if(onParticleDelta) onParticleDelta(100); break;
-        case 3: if(onParticleDelta) onParticleDelta(500); break;
-        case 4: if(onSpeedDelta) onSpeedDelta(0.85f); break;
-        case 5: if(onSpeedDelta) onSpeedDelta(1.18f); break;
-        case 6: zoomAt(mouseX, mouseY, 0.85f); break;
-        case 7: zoomAt(mouseX, mouseY, 1.18f); break;
+        case 0: if(onToggleEmission) onToggleEmission(); break;
+        case 1: if(onBatchDelta) onBatchDelta(-50); break;
+        case 2: if(onBatchDelta) onBatchDelta(50); break;
+        case 3: if(onIntervalDelta) onIntervalDelta(0.05f); break; // longer interval = lower freq
+        case 4: if(onIntervalDelta) onIntervalDelta(-0.05f); break; // shorter interval = higher freq
+        case 5: if(onSpeedDelta) onSpeedDelta(0.85f); break;
+        case 6: if(onSpeedDelta) onSpeedDelta(1.18f); break;
+        case 7: if(onBurst) onBurst(); break;
         case 8: resetView(); if(onResetView) onResetView(); break;
         case 9: if(onTogglePause) onTogglePause(); break;
       }
     }
   }
 
-  // Status text
-  curX += 12.0f;
-  char buf[128];
+  // Status text: active count, batch size, interval, speed, zoom, mode
+  curX += 10.0f;
+  char buf[160];
   if (collModeStr && *collModeStr) {
-    std::snprintf(buf, sizeof(buf), "%d PTS  SPD %.2f  Z %.2fX  [%s]",
-                  particleCount, speed, zoom_, collModeStr);
+    std::snprintf(buf, sizeof(buf), "%d PTS  %d/%.2fs  SPD %.2f  Z %.2fX  [%s]",
+                  particleCount, batchCount, intervalSec, speed, zoom_, collModeStr);
   } else {
-    std::snprintf(buf, sizeof(buf), "%d PTS  SPD %.2f  Z %.2fX",
-                  particleCount, speed, zoom_);
+    std::snprintf(buf, sizeof(buf), "%d PTS  %d/%.2fs  SPD %.2f  Z %.2fX",
+                  particleCount, batchCount, intervalSec, speed, zoom_);
   }
-  glColor3f(0.75f, 0.75f, 0.73f);
+  glColor3f(0.76f, 0.76f, 0.74f);
   drawText(curX, y + 4.0f, buf, 1.35f);
 
-  // Right-aligned helper hint
+  // Right-aligned helper hint if there is space
   const char *hint = "DRAG PAN   SCROLL ZOOM";
   float hintW = float(std::strlen(hint)) * 6.0f * 1.15f;
-  if (float(ww) - hintW - 12.0f > curX + 220.0f) {
-    glColor3f(0.48f, 0.48f, 0.46f);
+  if (float(ww) - hintW - 12.0f > curX + 260.0f) {
+    glColor3f(0.46f, 0.46f, 0.44f);
     drawText(float(ww) - hintW - 12.0f, y + 5.0f, hint, 1.15f);
   }
 

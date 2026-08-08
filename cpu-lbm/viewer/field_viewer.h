@@ -49,8 +49,12 @@ public:
 
   // UI control bar — flat matte buttons, no gradients.
   // App wires callbacks so viewer stays decoupled from TracerSet ownership.
-  std::function<void(int)> onParticleDelta; // e.g. -500 / -100 / +100 / +500
-  std::function<void(float)> onSpeedDelta;  // multiply dt by factor (e.g. 0.85 / 1.18)
+  std::function<void(int)> onParticleDelta;   // manual add/remove
+  std::function<void(int)> onBatchDelta;      // e.g. -50 / +50 or -100 / +100 particles per iteration
+  std::function<void(float)> onIntervalDelta; // e.g. -0.05s / +0.05s between bursts
+  std::function<void(float)> onSpeedDelta;    // multiply dt by factor (e.g. 0.85 / 1.18)
+  std::function<void()> onToggleEmission;    // toggle pulse waves vs continuous stream
+  std::function<void()> onBurst;             // trigger immediate wave burst
   std::function<void()> onResetView;
   std::function<void()> onTogglePause;
   std::function<void()> onReseed;
@@ -61,7 +65,8 @@ public:
   bool drawControlBar(int framebufferW, int framebufferH,
                       double mouseX, double mouseY, bool mousePressed,
                       int particleCount, float speed, bool paused,
-                      const char *collModeStr = nullptr);
+                      int batchCount = 300, float intervalSec = 0.30f,
+                      bool pulseMode = true, const char *collModeStr = nullptr);
 
   // Simple hit-test helper for app-level extensions
   static bool hitTest(float mx, float my, float x, float y, float w, float h);
