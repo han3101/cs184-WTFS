@@ -35,20 +35,36 @@ add_executable(test_tracers tests/test_tracers.cpp)
 target_link_libraries(test_tracers PRIVATE cpu_lbm_core)
 add_test(NAME test_tracers COMMAND test_tracers)
 
-# Optional: viewer target will be added in Phase 0b (GLFW + OpenGL)
-# if you try to build tracers2d_live before 0b, CMake will error with a clear message
+# Phase 0b viewer — GLFW + OpenGL, linked only by *_live apps so core stays headless
 if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/viewer/field_viewer.cpp")
   find_package(OpenGL REQUIRED)
-  include(FetchContent)
-  FetchContent_Declare(glfw
-    GIT_REPOSITORY https://github.com/glfw/glfw.git
-    GIT_TAG 3.4
-  )
-  FetchContent_MakeAvailable(glfw)
+
+  # Prefer system GLFW (brew install glfw) for offline / fast builds; fallback to FetchContent
+  find_package(glfw3 QUIET)
+  if (NOT glfw3_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(glfw
+      GIT_REPOSITORY https://github.com/glfw/glfw.git
+      GIT_TAG 3.4
+    )
+    FetchContent_MakeAvailable(glfw)
+  endif()
+
   add_library(cpu_lbm_viewer STATIC viewer/field_viewer.cpp)
   target_include_directories(cpu_lbm_viewer PUBLIC src viewer)
-  target_link_libraries(cpu_lbm_viewer PUBLIC cpu_lbm_core glfw OpenGL::GL)
+  if (APPLE)
+    target_compile_definitions(cpu_lbm_viewer PUBLIC GL_SILENCE_DEPRECATION)
+  endif()
+  # OpenGL target name differs by CMake version/platform
+  if (TARGET OpenGL::GL)
+    target_link_libraries(cpu_lbm_viewer PUBLIC cpu_lbm_core glfw OpenGL::GL)
+  else()
+    target_link_libraries(cpu_lbm_viewer PUBLIC cpu_lbm_core glfw OpenGL::OpenGL)
+  endif()
 
   add_executable(tracers2d_live apps/tracers2d_live.cpp)
   target_link_libraries(tracers2d_live PRIVATE cpu_lbm_viewer)
+  if (APPLE)
+    target_compile_definitions(tracers2d_live PRIVATE GL_SILENCE_DEPRECATION)
+  endif()
 endif()
