@@ -50,7 +50,23 @@ We will revive incrementally and keep `main` green after each step.
 
 Contributions should target the current step only; open an issue before jumping ahead.
 
-## Build & run
+## cpu-run — cpu-lbm Phase 0a (the only working simulator right now)
+
+Headless tracer loop on a uniform field. No viewer, no physics yet — that's Phase 0b/0c. From repo root:
+
+```bash
+cmake -S cpu-lbm -B cpu-lbm/build -DCMAKE_BUILD_TYPE=Release
+cmake --build cpu-lbm/build -j
+ctest --test-dir cpu-lbm/build --output-on-failure
+./cpu-lbm/build/tracers2d_headless --steps 2000
+./cpu-lbm/build/tracers2d_headless --nx 256 --ny 128 --particles 10000 --steps 5000 --csv cpu-lbm/out/tracers.csv
+```
+
+`--csv` also prints to stdout. Columns: `step,avg_x,avg_y,recycled,total_recycled`. Gate 0a: `ctest` green, exits `0`, stable count, `total_recycled > 0` when `steps > nx/0.05`. See [cpu-lbm/README.md](cpu-lbm/README.md) for all flags (`--u0`, `--dt`, `--seed`).
+
+Viewer (`tracers2d_live`) and real LBM (`cyl2d_*`, `tunnel3d`) are not built yet — CMake will auto-enable them when `cpu-lbm/viewer/` lands (Phase 0b).
+
+## Build & run (legacy PBF — frozen)
 
 ```bash
 mkdir build && cd build

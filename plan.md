@@ -115,22 +115,84 @@ cpu-lbm/
 │   ├── obstacle.h/.cpp      # analytic shapes + voxel mask
 │   ├── obj.h/.cpp           # minimal OBJ loader
 │   ├── voxelize.h/.cpp      # mesh → solid mask
+│   ├── tracers.h/.cpp       # massless tracer particles advected by velocity field
 │   ├── probes.h/.cpp        # drag/lift via momentum exchange, wake probe, Strouhal
 │   └── io.h/.cpp            # PNG frames (stb_image_write), CSV metrics, raw volume dump
 ├── apps/
-│   ├── cyl2d_live.cpp       # GLFW window, ~real-time
+│   ├── tracers2d_headless.cpp # Phase 0a: uniform field + particles, no window
+│   ├── tracers2d_live.cpp   # Phase 0b: same + GLFW window (replaces cyl2d_live early)
+│   ├── cyl2d_live.cpp       # Phase A3+: LBM-driven version (evolves from tracers2d_live)
 │   ├── cyl2d_batch.cpp      # PNG + CSV, CI-friendly
 │   ├── cavity2d.cpp         # validation only
 │   └── tunnel3d.cpp         # headless
 ├── viewer/                  # GLFW + GL; linked only by *_live apps
-│   └── field_viewer.h/.cpp  # float texture + fullscreen quad + colormap shader
+│   └── field_viewer.h/.cpp  # float texture + fullscreen quad + colormap shader + particle overlay
 └── tests/
 ```
 
 Dependencies via `FetchContent`: GLFW (viewer only), `stb_image_write.h`, a unit-test
 framework (Catch2 or doctest).
 
-### Core algorithm
+### Execution order for cpu-lbm — scaffolding first, physics last
+
+Builds in three increments. Each is shippable and gates the next. No LBM until the loop
+and viewer are proven.
+
+#### Phase 0a — Minimal working simulator (no physics, headless)
+
+Goal: the repo builds, owns a grid, owns a velocity field, and streams particles through
+it in a tight loop. No Navier-Stokes — the field is a stub uniform flow `u = (u0, 0)`.
+
+Deliver:
+
+- `cpu-lbm/CMakeLists.txt` — builds `src` as a static lib + `apps/tracers2d_headless` + `tests`. No graphics dep yet.
+- `src/field.h` — SoA velocity storage + flat indexing that LBM will reuse verbatim:
+  `idx = y*nx + x` (2D), `idx = (z*ny + y)*nx + x` (3D); helpers `idxToXY`, bounds checks.
+  Stores `std::vector<float> ux, uy` (and `uz` for 3D) sized `ncells`. Allocate once.
+  Intentionally lay out as `f[q*ncells + idx]`-ready — document the future LBM layout in a comment so Phase 0c is a drop-in.
+- `src/tracers.h/.cpp` — `struct Tracer { float x, y; }` (3D adds z), `TracerSet` with `initRandom(n, domain)`, `advect(dt)` that samples the field with bilinear (2D) / trilinear (3D) interpolation, does `pos += u * dt`, and recycles at outlet → inlet with random spanwise position. Particle count is a pure visual knob; never touches field.
+- `src/units.h` stub — just `constexpr float U_LB = 0.05f` and domain size constants; full `units.h` (Re/τ/dx/dt conversion) lands in Phase 0c.
+- `apps/tracers2d_headless.cpp` — constructs `Field(nx=256, ny=128, u0=0.05)`, `TracerSet(10000)`, loops `steps=5000`, prints CSV `step, avg_x, recycled_count` or dumps `out/tracers.csv`. No window, CI-runnable.
+- `tests/test_field.cpp` — flat-index round-trip, out-of-bounds clamp, SoA stride; `tests/test_tracers.cpp` — particle seeded at inlet with uniform flow reaches outlet in `nx/u0` steps ± interpolation tolerance, recycling preserves count.
+
+Gate 0a: `cmake .. && make -j && ./tracers2d_headless --steps 2000` exits 0, CSV shows monotonic `avg_x` advance and stable count; `ctest` green. No graphics, no LBM.
+
+Explicit non-goals for 0a: `lattice.h`, `lbm.h`, `boundary.h`, `obstacle.h`, `voxelize.h`, `probes.h`, viewer — none exist yet.
+
+#### Phase 0b — Viewer (see it move)
+
+Goal: turn the headless loop into something you can watch. Same uniform field, now visible.
+
+Deliver:
+
+- `viewer/field_viewer.h/.cpp` — GLFW + GL, linked **only** by `*_live` apps so the solver lib stays headless. Minimal: fullscreen quad sampling a float texture for `|u|` colormap (optional for 0b — solid color is fine), plus `GL_POINTS` particle overlay fed from a dynamic VBO updated each frame from `TracerSet`. Shader pair `shaders/particles.vert/.frag`. Keep it <300 LOC.
+- `apps/tracers2d_live.cpp` — copies the headless loop but drives `FieldViewer::beginFrame/drawField/drawTracers/endFrame` at 60 Hz. Keyboard: `SPACE` pause, `R` reseed, `+/-` add/remove tracers (proves count is decoupled).
+- `CMakeLists.txt` update — `FetchContent` GLFW, `find_package(OpenGL)`, `add_executable(tracers2d_live ...)` linking `viewer`.
+
+Gate 0b: `./tracers2d_live` opens a window, particles stream left→right at constant speed, recycle visibly at inlet, frame time <16 ms at 10k particles on integrated graphics. Resizing window does not crash (field resizes or letterboxes — pick one and document).
+
+Explicit non-goal: no LBM, no obstacles, no vorticity viz — field is still uniform. If colormap is stubbed, document it as TODO for Phase D.
+
+#### Phase 0c — Plug in physics (LBM replaces the stub)
+
+Goal: keep every file from 0a/0b, replace `Field`'s uniform fill with a real LBM step. Tracers don't change — they just sample a now-non-uniform `u`.
+
+Deliver (this is where the original Project 2 file list arrives):
+
+- `src/lattice.h` — D2Q9 + D3Q19 velocity sets, weights, opposite indices, `cs² = 1/3`.
+- `src/units.h/.cpp` — full physical ↔ lattice conversion: pick `u_lb = 0.05` (Mach ≈ 0.087), `ν_lb = u_lb·L_lb/Re`, `τ = 3ν_lb + 0.5` with `τ > 0.51` assert, `dx = L_phys/L_lb`, `dt = dx·u_lb/u_phys`. Documented in `docs/units.md`.
+- `src/field.h` upgrade — add `std::vector<float> f, f_next` sized `Q*ncells` in SoA `f[q*ncells + idx]` ping-pong layout; `ux/uy/uz` become derived views computed by macroscopic step. Keep the same indexing helpers from 0a.
+- `src/lbm.h/.cpp` — `macroscopic()`, `equilibrium()`, `collideBGK()`, `streamPull()` (gather: `f_new[q][idx] = f_old[q][idx - c_q]`). Pull, not push — no atomics, direct GPU mapping.
+- `src/boundary.h/.cpp` — bounce-back on solid mask, Zou-He velocity inlet, zero-gradient outlet.
+- `src/obstacle.h/.cpp` + `src/voxelize.h/.cpp` + `src/obj.h/.cpp` — analytic cylinder/sphere + `mesh → solid mask` for car OBJ.
+- `src/probes.h/.cpp` + `src/io.h/.cpp` — drag/lift via momentum exchange, wake probe + Strouhal FFT, PNG/CSV dump.
+- `apps/cyl2d_live.cpp` — evolves from `tracers2d_live.cpp`: same viewer, same tracer code, but field is now stepped by `lbm.step()` each frame. Keep `tracers2d_live.cpp` around as a regression stub or fold it in behind a `--uniform` flag.
+
+Gate 0c: `./cyl2d_batch --re 100 --steps 20000` reproduces the Phase A3 targets (St 0.164–0.167, Cd 1.32–1.36) — i.e. 0c *is* Phase A3 done, with the scaffolding already proven. `./tracers2d_live --uniform` still passes Gate 0b (no regression).
+
+After 0c, continue with the validation ladder as originally planned (A1→A2→A3 is now mostly satisfied by 0c; run A1/A2 explicitly as regression, then B1/B2 for 3D).
+
+### Core algorithm (lands in Phase 0c)
 
 Velocity sets (`lattice.h`), with `cs² = 1/3`:
 
@@ -148,11 +210,11 @@ Per step:
 Two decisions that exist purely to make the Project 3 port mechanical:
 
 - **SoA layout, flat index `f[q * ncells + idx]`**, ping-pong between two buffers. Use the
-  *identical* layout in WGSL later.
+  *identical* layout in WGSL later. Phase 0a establishes the helpers; 0c fills the buffers.
 - **Pull streaming (gather), not push (scatter)** — reads neighbours, writes own cell. Maps
   directly to one GPU invocation per cell with no atomics.
 
-### Unit system (`docs/units.md`)
+### Unit system (`docs/units.md`) — lands in Phase 0c
 
 The most common source of silent wrongness. Write it down and test it:
 
@@ -162,7 +224,10 @@ The most common source of silent wrongness. Write it down and test it:
   — that ceiling is what forces Phase E)
 - `dx = L_phys / L_lb`, `dt = dx · u_lb / u_phys`
 
-### Phase A — 2D (D2Q9)
+Phase 0a uses a hardcoded `u_lb` with no conversion; the full system is tested in 0c with
+`tests/test_units.cpp` (round-trip physical ↔ lattice).
+
+### Phase A — 2D validation (D2Q9) — starts after 0c
 
 Gates, cheapest first, each blocking:
 
@@ -174,7 +239,7 @@ Gates, cheapest first, each blocking:
 
 A1 first because it catches unit-system and boundary-condition errors with almost no code.
 A3 is the payoff — visible Kármán vortex street. Measure St by FFT or zero-crossing count
-of transverse velocity at a fixed wake probe.
+of transverse velocity at a fixed wake probe. If 0c was validated against A3 directly, A1/A2 are regression checks here.
 
 ### Phase B — 3D (D3Q19)
 
@@ -204,7 +269,7 @@ as a spike before committing.
 against a case that is already validated, small enough to sidestep every buffer-limit
 issue, and cheap to diff against the CPU oracle. It also yields the cleanest possible
 speedup story: *identical algorithm, identical resolution, identical validation case,
-two backends.*
+two backends.* The same scaffolding-first order applies: port the uniform-field tracer loop before the LBM kernels.
 
 ```
 gpu-lbm/
@@ -287,7 +352,7 @@ resolution/Re ladder alongside the MLUPS table.
 Cheap, because the field already exists and WebGPU handles compute and render together
 with no readback:
 
-- tracer particles advected by the velocity field — **this is the "wind particles" visual**
+- tracer particles advected by the velocity field — **this is the "wind particles" visual** (already proven in Phase 0b/C1)
 - vorticity magnitude and/or Q-criterion isosurfaces for wake structure
 - live drag/lift readout
 
@@ -337,16 +402,18 @@ loading). It is not a substitute for learning ML directly.
 | Stage | Command | Pass condition |
 |---|---|---|
 | P1 frozen | `cd legacy-pbf/build && cmake .. && make -j && ./windsim -f ../scene/windTest.json` | runs as before the move |
+| 0a headless | `./tracers2d_headless --steps 2000` | CSV monotonic avg_x, count stable; `ctest` green |
+| 0b live | `./tracers2d_live` | window streams particles L→R at u0, recycle visible, 60fps @10k |
+| 0c/A3 | `./cyl2d_batch --re 100 --steps 20000` | St ∈ [0.164, 0.167], Cd ∈ [1.32, 1.36] |
 | A1 | `./cavity2d --case poiseuille` | L2 error vs analytic < 1e-3 |
 | A2 | `./cavity2d --re 1000` | centreline profile matches Ghia et al. |
-| A3 | `./cyl2d_batch --re 100 --steps 20000` | St ∈ [0.164, 0.167], Cd ∈ [1.32, 1.36] |
 | A3 (live) | `./cyl2d_live --re 100` | visible shedding, interactive Re |
 | B1 | `./tunnel3d --obstacle sphere --re 1e4` | Cd ≈ 0.47 ± 10% |
 | B2 | `./tunnel3d --obstacle assets/meshes/sphere.obj` | mask matches analytic |
 | C1 | `./cyl2d_gpu --re 100 --compare ../cpu-lbm/out/cyl2d.raw` | fields agree ~1e-5; St/Cd within 1% |
 | C2 | `./tunnel3d_gpu --obstacle sphere --compare ../cpu-lbm/out/sphere.raw` | fields agree ~1e-5; Cd within 1% |
 | bench | `./bench --all` in both projects | MLUPS table populated in `docs/benchmarks.md` |
-| unit | `ctest` in `cpu-lbm/build` | lattice invariants (Σw=1, Σw·c=0), unit round-trip, voxelizer |
+| unit | `ctest` in `cpu-lbm/build` | lattice invariants (Σw=1, Σw·c=0), unit round-trip, voxelizer, tracer advection, field indexing |
 
 Record every measured value in `docs/validation.md` alongside its literature reference, so
 regressions are detectable later.
@@ -354,14 +421,16 @@ regressions are detectable later.
 ## Suggested order
 
 1. Project 1 freeze + repo restructure (`docs/`, `assets/`, `legacy-pbf/`)
-2. Phase A1 → A2 → A3 (2D correctness; the payoff is watching the vortex street)
-3. Phase B1 → B2 (3D + geometry)
-4. Phase C1 (2D WebGPU port — learn the API against a known-correct case) + first
-   CPU/GPU benchmark numbers
-5. Phase C2 (3D WebGPU port, validated against B)
-6. Phase D (rendering — tracers, vorticity, drag readout)
-7. Phase E (high Re)
-8. Stretch: differentiable simulation
+2. **Phase 0a — cpu-lbm scaffolding, no physics** — `field.h` + `tracers.h` + `tracers2d_headless` (headless loop, CI-testable)
+3. **Phase 0b — viewer** — `viewer/field_viewer.h` + `tracers2d_live` (GLFW window, particles streaming on uniform field)
+4. **Phase 0c — physics** — `lattice.h`/`units.h`/`lbm.h`/`boundary.h`/`obstacle.h` replace uniform stub; `cyl2d_live` now LBM-driven; validate as A3
+5. Phase A1 → A2 regression (Poiseuille, cavity — should already pass if 0c did)
+6. Phase B1 → B2 (3D + geometry)
+7. Phase C1 (2D WebGPU port — learn the API against a known-correct case) + first CPU/GPU benchmark numbers — same 0a→0b→physics split applies on GPU
+8. Phase C2 (3D WebGPU port, validated against B)
+9. Phase D (rendering — vorticity/Q-criterion, drag readout; tracers already done in 0b)
+10. Phase E (high Re)
+11. Stretch: differentiable simulation
 
 Both projects keep 2D and 3D paths for their whole life. 2D stays the fast iteration
-loop and the benchmark control; 3D is the product.
+loop and the benchmark control; 3D is the product. Phase 0's split (field/grid → viewer → physics) is the template for both backends.
