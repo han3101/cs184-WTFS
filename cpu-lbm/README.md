@@ -79,13 +79,32 @@ Columns `step,avg_x,avg_y,recycled,total_recycled` every 10 steps. Gate: exits `
 ./build/tracers2d_live --coll passive                 # push-out only (future LBM guard)
 ```
 
-Window: dark field `nx*scale × ny*scale` pixels, particles stream L→R at `u0`, recycle at inlet visibly. Obstacles are flat warm-grey silhouettes with crisp outline (no glow/gradient) drawn via `viewer/field_viewer::drawObstacles` from `src/obstacle.h` SDFs. Resize is safe (letterboxes, no crash). Title shows `FPS / ms / recycled/s / count / coll / obs`.
+Window: dark field `nx*scale × ny*scale` pixels, particles enter as a thin inlet sheet at `x∈[0,1)` and stream L→R at `u0` (`SPD = u0·dt`), recycle at inlet visibly. New particles from top-bar / `KP +/-` also enter at inlet. Obstacles are flat warm-grey silhouettes with crisp outline (no glow/gradient) drawn via `viewer/field_viewer::drawObstacles` from `src/obstacle.h` SDFs. Resize is safe (letterboxes, no crash). Zoom/pan: scroll zooms to cursor, RMB-drag pans, `RST` resets. Title shows `PTS / SPD / Z / FPS / ms / recycled/s / count / coll / obs`.
 
-Controls: `SPACE` pause/resume, `R` reseed, `+/-` (or `KP +/-`) add/remove 100 tracers (count decoupled), `C` cycle coll mode `slip→stick→bounce→passive`, `B` toggle `circle→block→none`, `ESC`/`Q` quit. All obstacles in lattice coords `[0,nx)×[0,ny)` — same SDF later generates `solidMask` for LBM `boundary.h:setB`.
+Controls: `SPACE` pause/resume, `R` reseed, keypad `+/-` add/remove 100 tracers (or top-bar `-500/-100/+100/+500`), `S-/S+` (top-bar or `[/]`) speed `dt*=0.85/1.18`, `Z-/Z+` (top-bar or `-/=`) zoom, `C` cycle coll mode `slip→stick→bounce→passive`, `B` toggle `circle→block→none`, `0`/`RST` reset view, `ESC`/`Q` quit. All obstacles in lattice coords `[0,nx)×[0,ny)` — same SDF later generates `solidMask` for LBM `boundary.h:setB`.
 
 Gate 0b: window opens, constant-speed stream, recycle visible, obstacles deflect via SDF push + mode, stays >55 FPS at 10k points on integrated graphics, `+/-`/`R`/`C`/`B` live, resize does not crash.
 
-### 5. Clean
+### 5. Quick dev loop — `rebuild_and_run_cpu.sh` (macOS + Linux)
+
+From repo root (one command: configure → build → ctest → launch):
+
+```sh
+chmod +x rebuild_and_run_cpu.sh
+./rebuild_and_run_cpu.sh                              # build + launch defaults
+./rebuild_and_run_cpu.sh -- --nx 512 --particles 5000 # pass args to tracers2d_live
+./rebuild_and_run_cpu.sh --watch                      # rebuild & relaunch on every src change
+./rebuild_and_run_cpu.sh --watch -- -- --particles 20000 --circle 80 64 18
+```
+
+Or manually from this directory (same effect):
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --test-dir build && ./build/tracers2d_live
+```
+
+`--watch` uses `fswatch` on macOS (`brew install fswatch`) or `inotifywait` on Linux (`sudo apt install inotify-tools`), falls back to 1 s poll.
+
+### 6. Clean
 
 ```sh
 rm -rf build out

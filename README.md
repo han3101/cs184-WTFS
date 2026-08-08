@@ -74,7 +74,21 @@ ctest --test-dir cpu-lbm/build --output-on-failure
 ./cpu-lbm/build/tracers2d_live --no-obstacle
 ```
 
-Headless CSV: `step,avg_x,avg_y,recycled,total_recycled` (Gate 0a: `ctest` green, stable count, `total_recycled>0` when `steps > nx/0.05`). Viewer: dark field + warm-white points streaming L→R, warm-grey block/circle obstacle, recycle visible, resize safe. Controls `SPACE` pause, `R` reseed, `+/-` add/remove 100, `C` cycle `slip→stick→bounce→passive`, `B` toggle `circle→block→none`, `ESC`/`Q` quit. Full flags in [cpu-lbm/README.md](cpu-lbm/README.md). Real LBM (`cyl2d_*`, `tunnel3d`) still not built — Phase 0c.
+Headless CSV: `step,avg_x,avg_y,recycled,total_recycled` (Gate 0a: `ctest` green, stable count, `total_recycled>0` when `steps > nx/0.05`). Viewer: dark field + warm-white points streaming L→R, warm-grey block/circle obstacle, recycle visible, resize safe. Particles start as a thin inlet sheet at `x∈[0,1)` and flow left→right (added via UI also enters at inlet). Controls `SPACE` pause, `R` reseed, `+/-` add/remove 100, `C` cycle `slip→stick→bounce→passive`, `B` toggle `circle→block→none`, scroll zoom to cursor / RMB-drag pan, top-bar buttons `-500/-100/+100/+500` `S-/S+` `Z-/Z+` `RST` `PAUSE`, `ESC`/`Q` quit. Full flags in [cpu-lbm/README.md](cpu-lbm/README.md). Real LBM (`cyl2d_*`, `tunnel3d`) still not built — Phase 0c.
+
+### Quick dev loop — `rebuild_and_run_cpu.sh` (macOS + Linux)
+
+One-command reconfigure + rebuild + `ctest` + launch. Works on macOS (Apple Silicon/Intel, `brew`) and Linux.
+
+```bash
+chmod +x rebuild_and_run_cpu.sh
+./rebuild_and_run_cpu.sh                              # build + launch defaults
+./rebuild_and_run_cpu.sh -- --nx 512 --particles 5000 # pass args to tracers2d_live
+./rebuild_and_run_cpu.sh --watch                      # rebuild & relaunch on every src change
+./rebuild_and_run_cpu.sh --watch -- -- --particles 20000 --circle 80 64 18
+```
+
+What it does: `cmake -S cpu-lbm -B cpu-lbm/build -DCMAKE_BUILD_TYPE=Release` → `cmake --build cpu-lbm/build -j` → `ctest --test-dir cpu-lbm/build` → `exec cpu-lbm/build/tracers2d_live`. `--watch` uses `fswatch` on macOS (`brew install fswatch`) or `inotifywait` on Linux (`sudo apt install inotify-tools`), falls back to 1 s poll. Prereqs once: `xcode-select --install; brew install cmake glfw` (macOS) / `sudo apt install cmake build-essential libglfw3-dev libgl-dev` (Linux).
 
 ## Build & run (legacy PBF — frozen)
 
