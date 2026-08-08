@@ -10,11 +10,12 @@
 #include <string>
 #include <cmath>
 #include <vector>
+#include <algorithm>
 
 static void print_usage(const char *prog) {
   std::fprintf(stderr,
     "Usage: %s [options]\n"
-    "Phase 0b live viewer — uniform field + obstacles + tracers, now visible.\n"
+    "Phase 0b live viewer — uniform field + obstacles + tracers + zoom/controls.\n"
     "Options (all optional — you can just run and pick in-viewer):\n"
     "  --nx N          grid width  (default %d)\n"
     "  --ny N          grid height (default %d)\n"
@@ -27,10 +28,13 @@ static void print_usage(const char *prog) {
     "  --block cx cy w h  add AABB block at start (center + full size)\n"
     "  --no-obstacle      start with no obstacle (default is big circle)\n"
     "  --coll MODE     collision: slip|stick|bounce|passive (default slip)\n"
-    "Controls (while running) — pick shape live, flags are just for scripting:\n"
+    "Controls (while running):\n"
     "  SPACE  pause/resume   R  reseed   +/-  add/remove 100\n"
-    "  1  circle   2  block   0  none   B  cycle circle→block→none\n"
-    "  C  cycle coll mode (slip→stick→bounce→passive)\n"
+    "  1  circle   2  block   0  none   B  cycle circle->block->none\n"
+    "  C  cycle coll mode (slip->stick->bounce->passive)\n"
+    "  Scroll  zoom (toward cursor)   RMB-drag  pan   RST button  reset view\n"
+    "  Top bar buttons: -500/-100/+100/+500 particles, S-/S+ speed, Z-/Z+ zoom\n"
+    "  Keys: [ / ]  speed down/up   - / =  zoom out/in   0  reset view\n"
     "  ESC/q  quit\n",
     prog, cpu_lbm::NX_DEFAULT, cpu_lbm::NY_DEFAULT, cpu_lbm::U_LB_DEFAULT);
 }
@@ -72,11 +76,10 @@ int main(int argc, char **argv) {
   }
   if (nx<=0||ny<=0||nParticles<0||scale<=0){ std::fprintf(stderr,"invalid nx/ny/particles/scale\n"); return 1; }
 
-  // Default big obstacle if none specified: big circle at tunnel center (visual gate)
   if (obstacles.empty() && !noDefaultObstacle) {
     float cx = float(nx)*0.45f;
     float cy = float(ny)*0.5f;
-    float r = std::min(float(nx), float(ny))*0.18f; // big, as requested
+    float r = std::min(float(nx), float(ny))*0.18f;
     obstacles.push_back(cpu_lbm::Obstacle::makeCircle(cx, cy, r));
   }
 
@@ -86,45 +89,63 @@ int main(int argc, char **argv) {
 
   try {
     cpu_lbm::FieldViewer viewer(nx, ny, scale, "WTFS — cpu-lbm 0b (uniform + obstacles)");
-
     auto *win = viewer.window();
     bool paused = false;
-    // edge detection for toggle keys
     bool spacePrev=false, rPrev=false, plusPrev=false, minusPrev=false, qPrev=false;
     bool cPrev=false, bPrev=false, k1Prev=false, k2Prev=false, k0Prev=false;
+    bool lbracketPrev=false, rbracketPrev=false, equalPrev=false, minusKeyPrev=false;
+
+    // wire viewer control bar callbacks
+    viewer.onParticleDelta = [&](int d){
+      if (d>0) tracers.add(d);
+      else tracers.remove(-d);
+      std::printf("[particles] %+d -> %zu\n", d, tracers.size());
+    };
+    viewer.onSpeedDelta = [&](float f){
+      dt = std::clamp(dt * f, 0.05f, 5.0f);
+      std::printf("[speed] dt -> %.3f (%.3f lattice)\n", dt, dt*u0);
+    };
+    viewer.onTogglePause = [&](){ paused = !paused; std::printf("[pause] %s\n", paused?"paused":"running"); };
+    viewer.onResetView = [&](){ std::printf("[view] reset\n"); };
 
     double lastTime = glfwGetTime();
     double lastFpsTime = lastTime;
     int frames = 0;
     int fps = 0;
-
-    // Track live recycle for title
     double lastRecycleCheck = lastTime;
     uint64_t lastRecycledTotal = tracers.stats().recycled;
-    int obstacleShapeIdx = 0; // 0=circle,1=block,2=none cycle
+    int obstacleShapeIdx = 0;
 
     while (!viewer.shouldClose()) {
       viewer.pollEvents();
 
-      // Input — poll each frame, edge-trigger
       bool spaceNow = glfwGetKey(win, GLFW_KEY_SPACE)==GLFW_PRESS;
       bool rNow = glfwGetKey(win, GLFW_KEY_R)==GLFW_PRESS;
-      bool plusNow = glfwGetKey(win, GLFW_KEY_EQUAL)==GLFW_PRESS || glfwGetKey(win, GLFW_KEY_KP_ADD)==GLFW_PRESS;
-      bool minusNow = glfwGetKey(win, GLFW_KEY_MINUS)==GLFW_PRESS || glfwGetKey(win, GLFW_KEY_KP_SUBTRACT)==GLFW_PRESS;
+      bool kpPlusNow = glfwGetKey(win, GLFW_KEY_KP_ADD)==GLFW_PRESS;
+      bool kpMinusNow = glfwGetKey(win, GLFW_KEY_KP_SUBTRACT)==GLFW_PRESS;
       bool qNow = glfwGetKey(win, GLFW_KEY_Q)==GLFW_PRESS;
       bool cNow = glfwGetKey(win, GLFW_KEY_C)==GLFW_PRESS;
       bool bNow = glfwGetKey(win, GLFW_KEY_B)==GLFW_PRESS;
       bool k1Now = glfwGetKey(win, GLFW_KEY_1)==GLFW_PRESS;
       bool k2Now = glfwGetKey(win, GLFW_KEY_2)==GLFW_PRESS;
       bool k0Now = glfwGetKey(win, GLFW_KEY_0)==GLFW_PRESS;
+      bool lbracketNow = glfwGetKey(win, GLFW_KEY_LEFT_BRACKET)==GLFW_PRESS;
+      bool rbracketNow = glfwGetKey(win, GLFW_KEY_RIGHT_BRACKET)==GLFW_PRESS;
 
       if (spaceNow && !spacePrev) paused = !paused;
       if (qNow && !qPrev) glfwSetWindowShouldClose(win, GLFW_TRUE);
       if (rNow && !rPrev) tracers.reseed(uint32_t(std::rand()));
-      if (plusNow && !plusPrev) tracers.add(100);
-      if (minusNow && !minusPrev) tracers.remove(100);
+      if (kpPlusNow && !plusPrev) tracers.add(100);
+      if (kpMinusNow && !minusPrev) tracers.remove(100);
+      if (lbracketNow && !lbracketPrev) { dt = std::clamp(dt*0.85f, 0.05f, 5.0f); std::printf("[speed] dt -> %.3f\n", dt); }
+      if (rbracketNow && !rbracketPrev) { dt = std::clamp(dt*1.18f, 0.05f, 5.0f); std::printf("[speed] dt -> %.3f\n", dt); }
+      // zoom keys: - / = and 0 reset (keypad +/- remain for particles)
+      bool equalNow = glfwGetKey(win, GLFW_KEY_EQUAL)==GLFW_PRESS;
+      bool minusKeyNow = glfwGetKey(win, GLFW_KEY_MINUS)==GLFW_PRESS;
+      if (equalNow && !equalPrev) { double mx,my; glfwGetCursorPos(win,&mx,&my); viewer.zoomAt(mx,my,1.18f); }
+      if (minusKeyNow && !minusKeyPrev) { double mx,my; glfwGetCursorPos(win,&mx,&my); viewer.zoomAt(mx,my,0.85f); }
+      if (k0Now && !k0Prev) viewer.resetView();
       if (cNow && !cPrev) {
-        // cycle slip->stick->bounce->passive->slip
         if (collMode==cpu_lbm::CollMode::Slip) collMode=cpu_lbm::CollMode::Stick;
         else if (collMode==cpu_lbm::CollMode::Stick) collMode=cpu_lbm::CollMode::Bounce;
         else if (collMode==cpu_lbm::CollMode::Bounce) collMode=cpu_lbm::CollMode::Passive;
@@ -161,23 +182,31 @@ int main(int argc, char **argv) {
         std::printf("[obstacle] -> big block (key 2)\n");
       }
       if (k0Now && !k0Prev) {
+        // also handled as reset view above
         obstacles.clear();
         obstacleShapeIdx=2;
+        // keep view reset separate from obstacle clear — viewer.resetView() already done
         std::printf("[obstacle] -> none (key 0)\n");
       }
 
-      spacePrev=spaceNow; rPrev=rNow; plusPrev=plusNow; minusPrev=minusNow; qPrev=qNow;
+      spacePrev=spaceNow; rPrev=rNow; plusPrev=kpPlusNow; minusPrev=kpMinusNow; qPrev=qNow;
       cPrev=cNow; bPrev=bNow; k1Prev=k1Now; k2Prev=k2Now; k0Prev=k0Now;
+      lbracketPrev=lbracketNow; rbracketPrev=rbracketNow;
+      equalPrev=equalNow; minusKeyPrev=minusKeyNow;
 
       if (!paused) tracers.advect(field, dt, obstacles, collMode);
+
+      int ww, wh; glfwGetFramebufferSize(win, &ww, &wh);
+      double mx,my; glfwGetCursorPos(win,&mx,&my);
+      bool leftDown = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT)==GLFW_PRESS;
 
       viewer.beginFrame();
       viewer.drawField(field);
       viewer.drawObstacles(obstacles);
       viewer.drawTracers(tracers);
+      viewer.drawControlBar(ww, wh, mx, my, leftDown, int(tracers.size()), dt*u0, paused);
       viewer.endFrame();
 
-      // FPS + live stats in title (proves count decoupled, recycle visible)
       frames++;
       double now = glfwGetTime();
       if (now - lastFpsTime >= 1.0) {
@@ -185,16 +214,15 @@ int main(int argc, char **argv) {
         double dtAvg = (frames>0) ? (now - lastFpsTime)/frames*1000.0 : 0;
         auto s = tracers.stats();
         double recycledPerSec = (now > lastRecycleCheck) ? double(s.recycled - lastRecycledTotal)/(now - lastRecycleCheck) : 0;
-        char title[256];
-        std::snprintf(title, sizeof(title), "WTFS 0b %dx%d  %d tracers  %s  %s  obs=%zu  %d FPS  %.1f ms  recycled %.0f/s  [SPACE pause R reseed +/- C coll B shape]",
-          nx, ny, int(tracers.size()), paused?"PAUSED":"running", cpu_lbm::collModeName(collMode), obstacles.size(), fps, dtAvg, recycledPerSec);
+        char title[320];
+        std::snprintf(title, sizeof(title), "WTFS 0b %dx%d  %d tracers  %s  %s  obs=%zu  %.2fx  SPD %.2f  %d FPS  %.1f ms  recycled %.0f/s  [SCROLL zoom RMB pan]",
+          nx, ny, int(tracers.size()), paused?"PAUSED":"running", cpu_lbm::collModeName(collMode), obstacles.size(), viewer.zoom(), dt*u0, fps, dtAvg, recycledPerSec);
         viewer.setTitle(title);
         lastFpsTime = now;
         lastRecycleCheck = now;
         lastRecycledTotal = s.recycled;
         frames = 0;
       }
-
       (void)lastTime;
     }
   } catch (const std::exception &e) {
