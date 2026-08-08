@@ -433,34 +433,34 @@ void FieldViewer::drawText(float x,float y,const char *text,float pixelSize){
   }
 }
 
-bool FieldViewer::drawButton(float x,float y,float w,float h,const char *label,bool hovered,bool pressed){
-  float r = hovered ? (pressed ? 0.20f : 0.32f) : 0.22f;
+bool FieldViewer::drawButton(float x, float y, float w, float h, const char *label, bool hovered, bool pressed){
+  float r = hovered ? (pressed ? 0.20f : 0.34f) : 0.24f;
   float g = r, b = r + 0.02f;
-  if (pressed && hovered) { r=0.18f; g=0.18f; b=0.20f; }
-  drawRect(x,y,w,h,r,g,b,1.0f);
+  if (pressed && hovered) { r = 0.18f; g = 0.18f; b = 0.20f; }
+  drawRect(x, y, w, h, r, g, b, 1.0f);
   if (hovered) {
-    drawRectBorder(x,y,w,h,0.50f,0.50f,0.52f);
+    drawRectBorder(x, y, w, h, 0.58f, 0.58f, 0.60f);
   } else {
-    drawRectBorder(x,y,w,h,0.34f,0.34f,0.36f);
+    drawRectBorder(x, y, w, h, 0.38f, 0.38f, 0.40f);
   }
-  // Center label
+  // Center label with large, crisp font
   int len = int(std::strlen(label));
-  float textScale = 1.35f;
+  float textScale = 1.70f;
   float textW = len * 6 * textScale;
   float tx = x + (w - textW) * 0.5f;
-  float ty = y + (h - 7*textScale)*0.5f - 1.0f;
+  float ty = y + (h - 7 * textScale) * 0.5f - 1.0f;
   if (pressed) { tx += 1.0f; ty -= 1.0f; }
   if (hovered) {
     glColor3f(1.0f, 1.0f, 0.98f);
   } else {
-    glColor3f(0.88f, 0.88f, 0.86f);
+    glColor3f(0.90f, 0.90f, 0.88f);
   }
   drawText(tx, ty, label, textScale);
   return hovered;
 }
 
-bool FieldViewer::hitTest(float mx,float my,float x,float y,float w,float h){
-  return mx>=x && mx<=x+w && my>=y && my<=y+h;
+bool FieldViewer::hitTest(float mx, float my, float x, float y, float w, float h){
+  return mx >= x && mx <= x + w && my >= y && my <= y + h;
 }
 
 bool FieldViewer::drawControlBar(int ww, int wh, double mouseX, double mouseY, bool mousePressed,
@@ -481,50 +481,50 @@ bool FieldViewer::drawControlBar(int ww, int wh, double mouseX, double mouseY, b
   double uiMx = fbMx;
   double uiMy = double(wh) - fbMy; // bottom origin
 
-  const float barH = controlBarHeight();
+  const float barH = controlBarHeight(); // 48.0f
   float barY = float(wh) - barH;
 
   // Bar background — matte dark neutral
   drawRect(0, barY, float(ww), barH, 0.13f, 0.13f, 0.15f, 0.98f);
   // Bottom border line
-  drawRect(0, barY, float(ww), 1.0f, 0.26f, 0.26f, 0.28f, 1.0f);
+  drawRect(0, barY, float(ww), 1.5f, 0.28f, 0.28f, 0.30f, 1.0f);
 
-  // Buttons layout
+  // Large, comfortable buttons layout (height = 36px)
   struct Btn { float x, w; const char* label; int id; };
-  float h = 24.0f;
+  float h = 36.0f;
   float y = barY + (barH - h) * 0.5f;
 
   std::vector<Btn> btns;
-  float curX = 8.0f;
+  float curX = 10.0f;
   auto add = [&](float w_, const char* lab, int id){
     btns.push_back({curX, w_, lab, id});
-    curX += w_ + 5.0f;
+    curX += w_ + 6.0f;
   };
 
-  // 1. Mode toggle: PULSE vs STREAM
-  add(56, pulseMode ? "PULSE" : "STREAM", 0);
+  // 1. Mode toggle: PULSE vs STREAM (84px)
+  add(84, pulseMode ? "PULSE" : "STREAM", 0);
 
-  // 2. Batch size: BATCH - and BATCH + (changes particles per pulse)
-  add(54, "BATCH -", 1);
-  add(54, "BATCH +", 2);
+  // 2. Batch size: BATCH - and BATCH + (84px each)
+  add(84, "BATCH -", 1);
+  add(84, "BATCH +", 2);
   curX += 4.0f;
 
-  // 3. Frequency / Interval: FREQ - and FREQ + (changes time between pulses)
-  add(52, "FREQ -", 3);
-  add(52, "FREQ +", 4);
+  // 3. Frequency / Interval: FREQ - and FREQ + (80px each)
+  add(80, "FREQ -", 3);
+  add(80, "FREQ +", 4);
   curX += 4.0f;
 
-  // 4. Flow speed: SPD - and SPD +
-  add(50, "SPD -", 5);
-  add(50, "SPD +", 6);
+  // 4. Flow speed: SPD - and SPD + (74px each)
+  add(74, "SPD -", 5);
+  add(74, "SPD +", 6);
   curX += 4.0f;
 
-  // 5. Emit manual burst
-  add(50, "BURST", 7);
+  // 5. Emit manual burst (74px)
+  add(74, "BURST", 7);
 
-  // 6. Reset view & pause/play
-  add(50, "RESET", 8);
-  add(52, paused ? "PLAY" : "PAUSE", 9);
+  // 6. Reset view & pause/play (74px and 78px)
+  add(74, "RESET", 8);
+  add(78, paused ? "PLAY" : "PAUSE", 9);
 
   bool anyHover = false;
   bool uiHover = uiMy >= barY && uiMy <= float(wh);
@@ -552,7 +552,7 @@ bool FieldViewer::drawControlBar(int ww, int wh, double mouseX, double mouseY, b
   }
 
   // Status text: active count, batch size, interval, speed, zoom, mode
-  curX += 10.0f;
+  curX += 14.0f;
   char buf[160];
   if (collModeStr && *collModeStr) {
     std::snprintf(buf, sizeof(buf), "%d PTS  %d/%.2fs  SPD %.2f  Z %.2fX  [%s]",
@@ -561,15 +561,15 @@ bool FieldViewer::drawControlBar(int ww, int wh, double mouseX, double mouseY, b
     std::snprintf(buf, sizeof(buf), "%d PTS  %d/%.2fs  SPD %.2f  Z %.2fX",
                   particleCount, batchCount, intervalSec, speed, zoom_);
   }
-  glColor3f(0.76f, 0.76f, 0.74f);
-  drawText(curX, y + 4.0f, buf, 1.35f);
+  glColor3f(0.80f, 0.80f, 0.78f);
+  drawText(curX, y + 9.0f, buf, 1.55f);
 
   // Right-aligned helper hint if there is space
   const char *hint = "DRAG PAN   SCROLL ZOOM";
-  float hintW = float(std::strlen(hint)) * 6.0f * 1.15f;
-  if (float(ww) - hintW - 12.0f > curX + 260.0f) {
-    glColor3f(0.46f, 0.46f, 0.44f);
-    drawText(float(ww) - hintW - 12.0f, y + 5.0f, hint, 1.15f);
+  float hintW = float(std::strlen(hint)) * 6.0f * 1.35f;
+  if (float(ww) - hintW - 14.0f > curX + 280.0f) {
+    glColor3f(0.50f, 0.50f, 0.48f);
+    drawText(float(ww) - hintW - 14.0f, y + 10.0f, hint, 1.35f);
   }
 
   uiMouseDownPrev_ = mousePressed;

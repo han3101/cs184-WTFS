@@ -45,7 +45,7 @@ public:
   void resetView();
   void zoomAt(double mouseX, double mouseY, float factor); // mouse in window/screen coords
 
-  float controlBarHeight() const { return 36.0f; } // height in framebuffer pixels
+  float controlBarHeight() const { return 48.0f; } // height in framebuffer pixels
 
   // UI control bar — flat matte buttons, no gradients.
   // App wires callbacks so viewer stays decoupled from TracerSet ownership.
