@@ -10,7 +10,7 @@
 #
 # macOS prereqs (once):  xcode-select --install; brew install cmake glfw  # fswatch optional for --watch
 # Linux prereqs (once):  sudo apt update && sudo apt install -y cmake build-essential libglfw3-dev libgl-dev  # inotify-tools optional
-set -euo pipefail
+set -eo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SRC="$ROOT/cpu-lbm"
@@ -19,13 +19,12 @@ BIN="$BUILD/tracers2d_live"
 
 # --- arg parse ---
 # Supports: ./rebuild_and_run_cpu.sh [--watch] [-- <app-args...>]
+# Note: macOS ships bash 3.2 where ${array[@]} + set -u misfire, so we avoid nounset.
 WATCH=0
 APP_ARGS=()
-# Extract --watch and everything after bare --
 ARGS=("$@")
-OUT=()
 HAS_SEP=0
-for a in "${ARGS[@]}"; do
+for a in "${ARGS[@]:-}"; do
   if [[ "$a" == "--" ]]; then HAS_SEP=1; break; fi
 done
 
@@ -34,16 +33,16 @@ if [[ $HAS_SEP -eq 1 ]]; then
   BEFORE=()
   AFTER=()
   SEEN=0
-  for a in "${ARGS[@]}"; do
+  for a in "${ARGS[@]:-}"; do
     if [[ $SEEN -eq 0 && "$a" == "--" ]]; then SEEN=1; continue; fi
     if [[ $SEEN -eq 0 ]]; then BEFORE+=("$a"); else AFTER+=("$a"); fi
   done
-  for b in "${BEFORE[@]}"; do
+  for b in "${BEFORE[@]:-}"; do
     if [[ "$b" == "--watch" ]]; then WATCH=1; fi
   done
-  APP_ARGS=("${AFTER[@]}")
+  APP_ARGS=("${AFTER[@]:-}")
 else
-  for a in "${ARGS[@]}"; do
+  for a in "${ARGS[@]:-}"; do
     if [[ "$a" == "--watch" ]]; then WATCH=1; fi
   done
 fi
