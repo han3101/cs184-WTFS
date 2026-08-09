@@ -195,7 +195,7 @@ Gate 0c: `./cyl2d_batch --re 100 --steps 20000` reproduces the Phase A3 targets 
 Solver, boundaries, probes, IO, both apps and four new test suites are written.
 Six bugs found in review and fixed (`docs/findings.md` §7) — the first pass
 diverged to NaN while every test passed and the process exited `0`. Remaining
-work before 0c can be called done, tracked as O1–O5 in `docs/findings.md` §8:
+work before 0c can be called done, tracked as O1–O6 in `docs/findings.md` §8:
 
 - **O1** — closed-box no-slip decay test fails on a guessed threshold; run it
   past one viscous decay time (~583 steps at the test's `tau`) and set bounds
@@ -210,6 +210,12 @@ work before 0c can be called done, tracked as O1–O5 in `docs/findings.md` §8:
 - **O4/O5** — `io::writePNG` is a stub, and `voxelize.*` / `obj.*` were never
   written. Both are struck from 0c scope: PNG moves to Phase D, the voxelizer
   and OBJ loader move to Phase B where the 3D path actually needs them.
+- **O6 — cyl2d_live explodes on startup, particles freeze [TODO]** — live-only
+  divergence not seen in `cyl2d_batch`/`tracers --uniform`; tracked as
+  `docs/findings.md` §8 O6 with 5 hypotheses (tau/units mismatch, solid mask
+  rebuild without re-init, bounce-back double-reflect, missing inlet/outlet at
+  startup, NaN advection) and a headless-vs-live repro plan. Fix field first,
+  then particles.
 
 Deliberate deviations from the spec above, both worth keeping:
 

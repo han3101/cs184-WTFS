@@ -219,6 +219,27 @@ Two things to separate before touching the threshold:
 
 Do **not** simply relax the threshold until (1) and (2) are distinguished.
 
+### O6 — cyl2d_live explodes on startup, particles freeze [OPEN]
+`apps/cyl2d_live.cpp` + `src/lbm.cpp` / `src/boundary.cpp` / `src/field.cpp` / `apps/live_common.h`
+
+**Observed:** `cyl2d_live` (LBM D2Q9, default `400×80, Re=100, u0=0.05, D≈20`) diverges immediately after launch — velocity field spikes / NaN within first seconds — and tracer particles stop advecting (frozen / sampled as zero or NaN). `tracers2d_live --uniform` and `cyl2d_live --uniform` remain stable, so the shared `FieldViewer` / `live_common.h` framework is not the cause; the LBM step or its coupling to the live loop is. No separate issue was filed before this TODO.
+
+**Hypotheses to separate (do not fix blindly):**
+1. **Tau / units mismatch in live loop:** `live_common.h` `LiveParams.dt` (particle `dt`) vs LBM `tau` vs physical `dt` confusion; `updatePhysics()` recomputes `tau` from `Re/D/u0` but `cyl2d_live` default `D` derived from `ny` vs obstacle `r` may mismatch `cyl2d_batch` proven path.
+2. **Solid mask rebuild race:** `onObstacleChange` rebuilds `solid` mid-run without re-initializing `f`/`f_next` at newly-solid / newly-fluid cells → stale distributions in `field.f` fed to `collideBGK`/`macroscopic` → `rho→0` → `u→Inf/NaN`.
+3. **Bounce-back double-reflect:** F1 fix fused bounce into `streamPull`; `boundary::applyBounceBack` was deleted but `live_common.h` obstacle cycling still calls `updatePhysics()` → `buildSolidMask` → next `streamPull` may double-apply if any legacy boundary pass remains.
+4. **Inlet/outlet BC missing vs `--uniform`:** `cyl2d_live --uniform` bypasses boundaries; with LBM, `applyZouHeInlet`/`applyOutlet` (or fused wall) not applied at startup before first `macroscopic()` → `rho/u` inconsistent → tracers sample NaN.
+5. **Particle advect on NaN field:** `tracers.advect(field, dt, obstacles, Passive)` bilinearly samples `ux/uy`; if any `ux` is NaN, all downstream positions become NaN and `recycled` logic drops particles.
+
+**Investigation plan (TODO):**
+- [ ] Reproduce headless: `./cyl2d_batch --re 100 --steps 500 --nx 400 --ny 80` with `printf max|u|, min rho, max f` every 10 steps; confirm headless diverges or not — isolates viewer vs solver.
+- [ ] Reproduce live with `--uniform` vs LBM at same `nx/ny/u0/D`; log `tau`, `maxu`, `min rho` in title bar or `stderr` before divergence.
+- [ ] Add `field.isFinite()` guard (scan `f/rho/ux/uy` for `isfinite`) assert after `macroscopic()`; break and dump `field` raw on first failure.
+- [ ] Compare `cyl2d_live` startup sequence to `cyl2d_batch`: `initEquilibrium` → `buildSolidMask` → `collideAndStream` → `applyAll` → `macroscopic` ordering and `dt` scaling.
+- [ ] Do not touch `live_common.h` particle emission until field is proven finite; fix field first, then re-test particles.
+
+**Exit criteria:** `cyl2d_live --re 100` runs ≥2000 steps with `max|u| < 2·u0` and `rho ∈ [0.9,1.1]`, particles visibly advect and recycle; same `Re/D/u0` as `cyl2d_batch` passes Gate A3 narrow check.
+
 ### O3 — Gate A3 unmeasured [OPEN]
 `apps/cyl2d_batch.cpp`
 
@@ -240,4 +261,5 @@ written. Nothing in 2D needs them; they belong with the Phase B 3D path.
 
 ## 9. Changelog — Part II
 
+* 2026-08-09 — Added O6 TODO: cyl2d_live explodes on startup, particles freeze (live-only divergence, hypotheses + repro plan).
 * 2026-08-09 — Reviewed Phase 0c. Found F1–F6, fixed all six, logged O1–O5.
