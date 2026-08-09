@@ -45,7 +45,7 @@ public:
   void resetView();
   void zoomAt(double mouseX, double mouseY, float factor); // mouse in window/screen coords
 
-  float controlBarHeight() const { return 48.0f; } // height in framebuffer pixels
+  float controlBarHeight() const { return currentBarHeight_; } // height in framebuffer pixels
 
   // UI control bar — flat matte buttons, no gradients.
   // App wires callbacks so viewer stays decoupled from TracerSet ownership.
@@ -76,6 +76,7 @@ private:
   GLFWwindow *window_ = nullptr;
   float zoom_ = 1.0f;
   float panX_ = 0.0f, panY_ = 0.0f;
+  float currentBarHeight_ = 48.0f;
   bool isPanning_ = false;
   double lastMx_ = 0, lastMy_ = 0;
   double lastMouseX_ = 0, lastMouseY_ = 0;
@@ -99,7 +100,7 @@ private:
   void drawRectBorder(float x, float y, float w, float h, float r, float g, float b);
   void drawText(float x, float y, const char *text, float pixelSize = 1.35f);
   bool drawButton(float x, float y, float w, float h, const char *label,
-                  bool hovered, bool pressed);
+                  bool hovered, bool pressed, float textScale = 1.70f);
 
   // Convert framebuffer pixel (origin top-left from GLFW cursor) to field coords
   void screenToField(double fbMx, double fbMy, int fbW, int fbH, float &fx, float &fy) const;

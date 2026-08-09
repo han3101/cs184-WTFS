@@ -190,6 +190,39 @@ Deliver (this is where the original Project 2 file list arrives):
 
 Gate 0c: `./cyl2d_batch --re 100 --steps 20000` reproduces the Phase A3 targets (St 0.164–0.167, Cd 1.32–1.36) — i.e. 0c *is* Phase A3 done, with the scaffolding already proven. `./tracers2d_live --uniform` still passes Gate 0b (no regression).
 
+##### Status (2026-08-09) — 0c implemented, gate not yet met
+
+Solver, boundaries, probes, IO, both apps and four new test suites are written.
+Six bugs found in review and fixed (`docs/findings.md` §7) — the first pass
+diverged to NaN while every test passed and the process exited `0`. Remaining
+work before 0c can be called done, tracked as O1–O5 in `docs/findings.md` §8:
+
+- **O1** — closed-box no-slip decay test fails on a guessed threshold; run it
+  past one viscous decay time (~583 steps at the test's `tau`) and set bounds
+  from the measured decay constant.
+- **O2** — Poiseuille (Gate A1) sits at relative L2 `3.95e-3` against a `1e-3`
+  target, with `umax` 15% below the expected `1.5·u0`. Separate "not converged /
+  flow rate leaking at the outlet" from "O(Ma²) compressibility" by halving
+  `u_lb` before adjusting the threshold. **Do not relax the target first** — A1
+  exists precisely to catch unit-system and BC errors.
+- **O3** — Gate A3 itself is unmeasured since the fixes. Solver is verified
+  stable (`maxu ≈ 1.75·u0`), which is not the same as validated.
+- **O4/O5** — `io::writePNG` is a stub, and `voxelize.*` / `obj.*` were never
+  written. Both are struck from 0c scope: PNG moves to Phase D, the voxelizer
+  and OBJ loader move to Phase B where the 3D path actually needs them.
+
+Deliberate deviations from the spec above, both worth keeping:
+
+- **Bounce-back is fused into `streamPull`**, not a separate `boundary` pass.
+  When the pull source is solid *or* outside the domain, the cell takes its own
+  collided population from the opposite direction. This handles obstacle
+  surfaces and the north/south channel walls in one branch — note the original
+  file list gave the domain walls no BC at all, which was a real hole. Adding a
+  second bounce-back pass on top will double-reflect.
+- **No ping-pong swap.** `f` is canonical: `collideBGK` writes collided into
+  `f_next`, `streamPull` gathers back into `f`. The WGSL port should mirror this
+  rather than the swap-based phrasing under *Core algorithm*.
+
 After 0c, continue with the validation ladder as originally planned (A1→A2→A3 is now mostly satisfied by 0c; run A1/A2 explicitly as regression, then B1/B2 for 3D).
 
 ### Core algorithm (lands in Phase 0c)
@@ -404,8 +437,8 @@ loading). It is not a substitute for learning ML directly.
 | P1 frozen | `cd legacy-pbf/build && cmake .. && make -j && ./windsim -f ../scene/windTest.json` | runs as before the move |
 | 0a headless | `./tracers2d_headless --steps 2000` | CSV monotonic avg_x, count stable; `ctest` green |
 | 0b live | `./tracers2d_live` | window streams particles L→R at u0, recycle visible, 60fps @10k |
-| 0c/A3 | `./cyl2d_batch --re 100 --steps 20000` | St ∈ [0.164, 0.167], Cd ∈ [1.32, 1.36] |
-| A1 | `./cavity2d --case poiseuille` | L2 error vs analytic < 1e-3 |
+| 0c/A3 | `./cyl2d_batch --re 100 --steps 20000 --strict` | St ∈ [0.164, 0.167], Cd ∈ [1.32, 1.36]; `--strict` exits nonzero on a miss — **unmeasured, see findings §8 O3** |
+| A1 | `./build/test_lbm` (Poiseuille case) | rel L2 vs analytic < 1e-3 — **currently 3.95e-3, see findings §8 O2** |
 | A2 | `./cavity2d --re 1000` | centreline profile matches Ghia et al. |
 | A3 (live) | `./cyl2d_live --re 100` | visible shedding, interactive Re |
 | B1 | `./tunnel3d --obstacle sphere --re 1e4` | Cd ≈ 0.47 ± 10% |
@@ -423,7 +456,7 @@ regressions are detectable later.
 1. Project 1 freeze + repo restructure (`docs/`, `assets/`, `legacy-pbf/`)
 2. **Phase 0a — cpu-lbm scaffolding, no physics** — `field.h` + `tracers.h` + `tracers2d_headless` (headless loop, CI-testable)
 3. **Phase 0b — viewer** — `viewer/field_viewer.h` + `tracers2d_live` (GLFW window, particles streaming on uniform field)
-4. **Phase 0c — physics** — `lattice.h`/`units.h`/`lbm.h`/`boundary.h`/`obstacle.h` replace uniform stub; `cyl2d_live` now LBM-driven; validate as A3
+4. **Phase 0c — physics** — `lattice.h`/`units.h`/`lbm.h`/`boundary.h`/`obstacle.h` replace uniform stub; `cyl2d_live` now LBM-driven; validate as A3 — *written and debugged, gate still open: findings §8 O1–O3*
 5. Phase A1 → A2 regression (Poiseuille, cavity — should already pass if 0c did)
 6. Phase B1 → B2 (3D + geometry)
 7. Phase C1 (2D WebGPU port — learn the API against a known-correct case) + first CPU/GPU benchmark numbers — same 0a→0b→physics split applies on GPU

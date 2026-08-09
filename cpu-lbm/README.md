@@ -1,12 +1,21 @@
-# cpu-lbm — Phase 0a + 0b (headless + viewer)
+# cpu-lbm — Phase 0a + 0b + 0c (headless + viewer + LBM)
 
-Headless field/grid/tracer core with a thin live viewer on top. No physics yet — uniform flow `u=(0.05,0)` that Phase 0c will replace with LBM. Viewer is a neutral dark window with warm-white points; no gradients/glow.
+Headless field/grid/tracer core with a thin live viewer on top, now with a real D2Q9 Lattice Boltzmann solver underneath. Viewer is a neutral dark window with warm-white points; no gradients/glow.
 
-## cpu-run — build & run (what works right now)
+**Which app do I run?** Two families, and they look completely different:
+
+| App | Field | Use it for |
+|---|---|---|
+| `tracers2d_headless`, `tracers2d_live` | **uniform stub** `u=(0.05,0)` | Gate 0a/0b regression. Solver changes have *no effect* here. |
+| `cyl2d_batch`, `cyl2d_live` | **LBM** (D2Q9) | Gate 0c/A3. This is where physics shows up. |
+
+If you changed anything in `lbm.cpp` / `boundary.cpp` / `lattice.h` and want to see it, run **`cyl2d_live`** — `tracers2d_live` never calls the solver.
+
+## cpu-run — build & run
 
 ### Prerequisites
 
-CMake ≥3.16 + C++17 compiler. For the viewer (`tracers2d_live`) also: GLFW + OpenGL.
+CMake ≥3.16 + C++17 compiler. For the viewers (`*_live`) also: GLFW + OpenGL.
 
 macOS:
 ```sh
@@ -27,7 +36,9 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 # from repo root: cmake -S cpu-lbm -B cpu-lbm/build -DCMAKE_BUILD_TYPE=Release
 ```
 
-`Field`/`Tracers` need no deps — offline builds are green. `viewer/` auto-enables when `viewer/field_viewer.cpp` exists; otherwise only `tracers2d_headless` + tests are built.
+The solver needs no deps — offline builds are green. `viewer/` auto-enables when `viewer/field_viewer.cpp` exists; otherwise only the headless apps + tests are built.
+
+> **If `cmake` fails with `Could not find CMAKE_ROOT`**, the `cmake` first on your `PATH` is a broken install (e.g. an unbuilt source tree under `~/apps/`). Use the working one explicitly: `/usr/local/bin/cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`.
 
 ### 2. Build
 
@@ -36,19 +47,23 @@ cmake --build build -j
 ```
 
 Artifacts:
-- `build/tracers2d_headless` — headless loop, CI-friendly (always)
-- `build/test_field`, `build/test_tracers` — unit tests (always)
-- `build/tracers2d_live` — live window (only when GLFW/OpenGL found)
+- `build/tracers2d_headless` — Phase 0a uniform-field loop, CI-friendly (always)
+- `build/cyl2d_batch` — Phase 0c LBM cylinder, headless, prints Cd/St (always)
+- `build/test_field`, `test_tracers`, `test_lattice`, `test_units`, `test_lbm`, `test_boundary` (always)
+- `build/tracers2d_live` — Phase 0b uniform-field window (only when GLFW/OpenGL found)
+- `build/cyl2d_live` — Phase 0c LBM window (only when GLFW/OpenGL found)
+
+Nothing lands in `build/` if any target fails to compile — check the tail of the build log rather than assuming a stale binary is current.
 
 ### 3. Test
 
 ```sh
 ctest --test-dir build --output-on-failure
-# verbose:
-./build/test_field; ./build/test_tracers
+# individually:
+./build/test_lbm; ./build/test_boundary
 ```
 
-All `PASS`, 0 failures.
+Six suites. `test_lbm` carries the physics gates: closed-box mass conservation and no-slip decay, plus the Poiseuille profile check (Gate A1) which prints its measured relative L2.
 
 ### 4a. Run headless (Gate 0a)
 
@@ -91,6 +106,39 @@ Live controls:
 - **Mouse / Trackpad**: 1-finger / left-drag pans with 1:1 cursor lock; 2-finger scroll zooms at cursor; Shift-scroll pans
 - **SPACE** pause/resume, **R** clear & reseed, **C** cycle collision mode, **B** toggle obstacle, **0 / RESET** reset view, **ESC / Q** quit.
 
+### 4c. Run LBM headless (Gate 0c / A3)
+
+```sh
+./build/cyl2d_batch                                   # defaults: 400x80, Re=100, u0=0.05, 20000 steps
+./build/cyl2d_batch --re 100 --steps 20000 --strict   # CI form: nonzero exit if the gate misses
+mkdir -p out && ./build/cyl2d_batch --csv out/cyl2d.csv --raw out/cyl2d.raw
+./build/cyl2d_batch --nx 800 --ny 160 --re 100        # finer: D doubles to 40 cells
+./build/cyl2d_batch --uniform                         # skip LBM entirely (0a/0b regression)
+```
+
+Prints `step N Cd=… St=…` every 2000 steps, then a `FINAL` line and `gate A3 PASSED` / `gate A3 FAILED`.
+Gate targets are St ∈ [0.164, 0.167] and Cd ∈ [1.32, 1.36]; `--strict` turns a miss into exit code 1 so `ctest`/CI can depend on it. Without `--strict` it reports and exits 0.
+
+`--csv` writes `step,drag,lift,Cd,Cl,St`; `--raw` dumps `ux`, `uy`, `rho` as three contiguous float arrays — that's the file Phase C1 diffs the GPU port against.
+
+If the run diverges you get `gate A3 FAILED … — solution diverged` rather than a silent `nan`. Divergence usually means τ is too close to 0.5: raise resolution (`--ny`) so D grows, don't lower `u0`. See `docs/units.md`.
+
+### 4d. Run LBM viewer (Gate 0c, live)
+
+```sh
+./build/cyl2d_live                                    # 400x80, Re=100, cylinder at 30% span
+./build/cyl2d_live --re 150 --scale 3
+./build/cyl2d_live --nx 600 --ny 120 --re 100 --u0 0.05
+./build/cyl2d_live --circle 120 40 10                 # explicit obstacle: cx cy r
+./build/cyl2d_live --block 120 40 20 20               # cx cy w h
+./build/cyl2d_live --no-obstacle                      # empty channel — should relax to Poiseuille
+./build/cyl2d_live --uniform                          # LBM off, uniform field (Gate 0b regression)
+```
+
+Controls: **SPACE** pause/resume, **ESC** quit.
+
+What you should see: tracers accelerate around the cylinder shoulders, a symmetric recirculation pair forms behind it within the first few thousand steps, then the wake destabilises into an alternating Kármán vortex street. If the tracers just stream straight through as if nothing is there, you are almost certainly running `tracers2d_live` (uniform field) rather than `cyl2d_live`.
+
 ### 5. Quick dev loop — `rebuild_and_run_cpu.sh` (macOS + Linux)
 
 From repo root (one command: configure → build → ctest → launch):
@@ -123,8 +171,28 @@ rm -rf build out
 - ✅ `src/obstacle.h` — SDF `Circle`/`AABB` + `CollMode` `slip|stick|bounce|passive` (Phase 0b visual; 0c keeps passive guard)
 - ✅ `tracers2d_headless` + `ctest` green (`advect` overload keeps Gate 0a)
 - ✅ `viewer/field_viewer` + `tracers2d_live` — live window, same field/tracer loop, `drawObstacles` + `--circle/--block/--coll/--no-obstacle` + `C`/`B` keys
-- ⏳ `lattice.h` / `lbm.h` / `boundary.h` / `voxelize.h` — Phase 0c (real LBM replaces `fillUniform`), not yet
+- ✅ `lattice.h` — D2Q9 weights/opposites (D3Q19 defined, unused until Phase B)
+- ✅ `units.h` + `docs/units.md` — `LbUnits::fromRe` → ν, τ, dx, dt with a τ>0.51 stability predicate
+- ✅ `lbm.h/.cpp` — BGK collide + pull-stream, halfway bounce-back fused into the stream
+- ✅ `boundary.h/.cpp` — Zou-He velocity inlet, zero-gradient outlet, SDF→solid mask
+- ✅ `probes.h/.cpp` — Ladd momentum-exchange drag/lift, wake probe + zero-crossing Strouhal
+- ✅ `io.h/.cpp` — raw field dump, field CSV, probe-history CSV
+- ⏳ `io::writePNG` — stub returning `false`; frame export is Phase D
+- ⏳ `voxelize.h` / `obj.h` — deferred to Phase B with the 3D path (no car mesh yet)
+
+### Buffer contract (read before touching `lbm.cpp`)
+
+`f` is the canonical state; there is no ping-pong swap.
+
+```
+collideBGK:  reads f       → writes collided into f_next
+streamPull:  reads f_next  → writes streamed  into f     (+ fused bounce-back)
+boundary::applyAll:  fixes up inlet/outlet columns of f
+macroscopic():       derives rho/ux/uy from f
+```
+
+No-slip is handled entirely inside `streamPull`: when the pull source is solid *or* outside the domain, the cell takes its own collided population from the opposite direction. That covers obstacle surfaces and the north/south channel walls in one branch — there is deliberately no separate bounce-back pass, and adding one will double-reflect.
 
 ## Next
 
-Phase 0c: `lattice.h`/`units.h`/`lbm.h`/`boundary.h` — replace `fillUniform` with `lbm.step()`; tracers keep `advect(...,obstacles,passive)` as tunneling guard only (active `slip/bounce` removed, `sdf<0→solidMask` drives real `f_opp` bounce-back); viewer keeps same `drawObstacles` API.
+Phase A1 → A2 as explicit regression (Poiseuille already lives in `test_lbm`; cavity at Re=1000 vs Ghia et al. still to write), then Phase B for D3Q19 + the OBJ voxelizer.
