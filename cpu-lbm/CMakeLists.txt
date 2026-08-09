@@ -12,9 +12,14 @@ else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# Core library — no graphics deps, no external fetches in Phase 0a
+# Core library — no graphics deps in Phase 0c solver
 add_library(cpu_lbm_core STATIC
+  src/field.cpp
   src/tracers.cpp
+  src/lbm.cpp
+  src/boundary.cpp
+  src/probes.cpp
+  src/io.cpp
 )
 target_include_directories(cpu_lbm_core PUBLIC src)
 
@@ -24,7 +29,13 @@ add_executable(tracers2d_headless
 )
 target_link_libraries(tracers2d_headless PRIVATE cpu_lbm_core)
 
-# Tests — header-only, no external framework in Phase 0a (keeps offline builds green)
+# Phase 0c batch app
+add_executable(cyl2d_batch
+  apps/cyl2d_batch.cpp
+)
+target_link_libraries(cyl2d_batch PRIVATE cpu_lbm_core)
+
+# Tests — header-only, no external framework (keeps offline builds green)
 enable_testing()
 
 add_executable(test_field tests/test_field.cpp)
@@ -34,6 +45,22 @@ add_test(NAME test_field COMMAND test_field)
 add_executable(test_tracers tests/test_tracers.cpp)
 target_link_libraries(test_tracers PRIVATE cpu_lbm_core)
 add_test(NAME test_tracers COMMAND test_tracers)
+
+add_executable(test_lattice tests/test_lattice.cpp)
+target_link_libraries(test_lattice PRIVATE cpu_lbm_core)
+add_test(NAME test_lattice COMMAND test_lattice)
+
+add_executable(test_units tests/test_units.cpp)
+target_link_libraries(test_units PRIVATE cpu_lbm_core)
+add_test(NAME test_units COMMAND test_units)
+
+add_executable(test_lbm tests/test_lbm.cpp)
+target_link_libraries(test_lbm PRIVATE cpu_lbm_core)
+add_test(NAME test_lbm COMMAND test_lbm)
+
+add_executable(test_boundary tests/test_boundary.cpp)
+target_link_libraries(test_boundary PRIVATE cpu_lbm_core)
+add_test(NAME test_boundary COMMAND test_boundary)
 
 # Phase 0b viewer — GLFW + OpenGL, linked only by *_live apps so core stays headless
 if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/viewer/field_viewer.cpp")
@@ -72,5 +99,14 @@ if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/viewer/field_viewer.cpp")
   target_link_libraries(tracers2d_live PRIVATE cpu_lbm_viewer)
   if (APPLE)
     target_compile_definitions(tracers2d_live PRIVATE GL_SILENCE_DEPRECATION)
+  endif()
+
+  # LBM live viewer — same viewer, LBM-driven
+  add_executable(cyl2d_live
+    apps/cyl2d_live.cpp
+  )
+  target_link_libraries(cyl2d_live PRIVATE cpu_lbm_viewer)
+  if (APPLE)
+    target_compile_definitions(cyl2d_live PRIVATE GL_SILENCE_DEPRECATION)
   endif()
 endif()
