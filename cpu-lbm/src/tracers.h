@@ -80,7 +80,7 @@ private:
   float emitInterval_ = 0.30f;     // default: every 0.3 seconds
   float emitTimer_ = 0.0f;
   bool periodicEmission_ = false;  // false for classic headless/test, enabled in live viewer
-  int maxTracers_ = 50000;
+  int maxTracers_ = 500000;
 
   void recycleOne(Tracer &t);
 };

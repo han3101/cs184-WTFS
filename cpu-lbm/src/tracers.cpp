@@ -43,10 +43,8 @@ void TracerSet::setEmitConfig(int count, float intervalSec, bool periodic) {
 int TracerSet::emitBurst(int count) {
   if (count <= 0 || ny <= 0) return 0;
   if (int(tracers.size()) + count > maxTracers_) {
-    int overflow = int(tracers.size()) + count - maxTracers_;
-    if (overflow > 0 && overflow <= int(tracers.size())) {
-      tracers.erase(tracers.begin(), tracers.begin() + overflow);
-    }
+    count = std::max(0, maxTracers_ - int(tracers.size()));
+    if (count == 0) return 0;
   }
   std::uniform_real_distribution<float> distX(0.0f, 1.0f);
   std::uniform_real_distribution<float> distY(0.0f, float(ny));
